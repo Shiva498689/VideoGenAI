@@ -1,7 +1,3 @@
-# ============================================================================
-# main.py - ORIGINAL STABLE AUDIO MODEL (Your code!)
-# ============================================================================
-
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -22,16 +18,9 @@ from datetime import datetime
 from diffusers import StableAudioPipeline
 import edge_tts
 
-# ============================================================================
-# LOGGING
-# ============================================================================
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# FASTAPI APP
-# ============================================================================
 
 app = FastAPI(
     title="AI Audio Generation API",
@@ -47,9 +36,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================================
-# CONSTANTS
-# ============================================================================
 
 TARGET_SECONDS = 4.0
 PAUSE_SECONDS = 0.4
@@ -58,10 +44,6 @@ SR_TARGET = 24000
 VOICES = {
     "person1": "en-GB-RyanNeural",
 }
-
-# ============================================================================
-# DEVICE DETECTION & DTYPE SELECTION
-# ============================================================================
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -77,9 +59,6 @@ else:
 
 logger.info(f"Device: {DEVICE.upper()}")
 
-# ============================================================================
-# PYDANTIC MODELS
-# ============================================================================
 
 class DialogueLine(BaseModel):
     speaker: str = Field(..., description="Speaker identifier")
@@ -98,9 +77,6 @@ class AudioGenerationResponse(BaseModel):
     file_url: Optional[str] = None
     error: Optional[str] = None
 
-# ============================================================================
-# LOAD STABLE AUDIO PIPELINE
-# ============================================================================
 
 logger.info("=" * 70)
 logger.info("Loading Stable Audio Model...")
@@ -145,10 +121,6 @@ except Exception as e:
     logger.error(f"FAILED TO LOAD: {str(e)}")
     logger.error("Make sure HF_TOKEN is in .env file!")
     audio_pipeline = None
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
 
 def generate_ambient_audio(prompt: str, negative_prompt: str, num_steps: int = 50) -> np.ndarray:
     if audio_pipeline is None:
@@ -212,10 +184,6 @@ async def generate_tts_line(text: str, voice: str) -> np.ndarray:
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-
-# ============================================================================
-# ENDPOINTS
-# ============================================================================
 
 @app.get("/")
 async def root():
