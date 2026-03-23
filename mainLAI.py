@@ -12,7 +12,7 @@ Full pipeline per scene
  2. GET  /projects/{pid}/scenes/{idx}
       → Poll until status == "confirming"
       → Response includes source_image_url for the UI to display
-
+ 
  3. POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": true }
       → Approved: starts 5-clip generation chain in background
     POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": false }
