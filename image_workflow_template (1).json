@@ -1,0 +1,66 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "Load Checkpoint" },
+    "inputs": {
+     "ckpt_name": "sdxl_lightning_4step.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "Empty Latent Image" },
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Positive prompt" },
+    "inputs": {
+      "text": "INJECTED_BY_BACKEND",
+      "clip": ["1", 1]
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Negative prompt" },
+    "inputs": {
+      "text": "blurry, distorted, low quality, watermark, deformed, extra limbs, bad anatomy, disfigured, mutated, ugly, duplicate",
+      "clip": ["1", 1]
+    }
+  },
+  "5": {
+    "class_type": "KSampler",
+    "_meta": { "title": "KSampler" },
+    "inputs": {
+      "model":        ["1", 0],
+      "positive":     ["3", 0],
+      "negative":     ["4", 0],
+      "latent_image": ["2", 0],
+      "seed":         42,
+      "steps":       4 ,
+      "cfg":          1.0,
+      "sampler_name": "euler_ancestral",
+      "scheduler":    "sgm_uniform",
+      "denoise":      1.0
+    }
+  },
+  "6": {
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE Decode" },
+    "inputs": {
+      "samples": ["5", 0],
+      "vae":     ["1", 2]
+    }
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save Image" },
+    "inputs": {
+      "filename_prefix": "ltx_keyframe",
+      "images":          ["6", 0]
+    }
+  }
+}

@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CineForge</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #06080b;
+  --surface:  #0c0f14;
+  --card:     #111620;
+  --border:   #1c2433;
+  --border2:  #2a3a50;
+  --gold:     #d4a843;
+  --gold2:    #f0c060;
+  --blue:     #4a90d9;
+  --green:    #3db87a;
+  --red:      #e05555;
+  --amber:    #e09030;
+  --text:     #b8c8d8;
+  --muted:    #4a5a6a;
+  --white:    #e8f0f8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'DM Mono',monospace;font-size:13px;min-height:100vh;overflow-x:hidden}
+
+/* grain */
+body::after{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");pointer-events:none;z-index:9999}
+
+/* header */
+header{border-bottom:1px solid var(--border);padding:14px 32px;display:flex;align-items:center;gap:18px;position:sticky;top:0;background:rgba(6,8,11,.96);backdrop-filter:blur(12px);z-index:100}
+header h1{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:5px;color:var(--gold);text-shadow:0 0 24px rgba(212,168,67,.25)}
+header .sub{color:var(--muted);font-size:10px;letter-spacing:2px;text-transform:uppercase;border-left:1px solid var(--border);padding-left:18px}
+header .gpu-badge{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:10px;letter-spacing:1px;color:var(--muted)}
+.gpu-dot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+.gpu-dot.busy{background:var(--amber);animation:pulse 1s infinite}
+
+/* layout */
+.workspace{display:grid;grid-template-columns:260px 1fr;min-height:calc(100vh - 57px)}
+
+/* sidebar */
+.sidebar{border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column}
+.sidebar-top{padding:20px 16px 12px;border-bottom:1px solid var(--border)}
+.sidebar-label{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.proj-list{display:flex;flex-direction:column;gap:4px}
+.proj-item{padding:8px 12px;border-radius:5px;border:1px solid transparent;cursor:pointer;transition:.15s;display:flex;align-items:center;gap:9px}
+.proj-item:hover{background:var(--card);border-color:var(--border)}
+.proj-item.active{background:rgba(212,168,67,.07);border-color:var(--gold)}
+.proj-item .pname{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--white)}
+.proj-item .pcount{font-size:10px;color:var(--muted)}
+.new-proj{display:flex;gap:6px;margin-top:10px}
+.new-proj input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:4px;padding:7px 10px;color:var(--white);font-family:'DM Mono',monospace;font-size:12px;outline:none}
+.new-proj input:focus{border-color:var(--blue)}
+
+.sidebar-scenes{flex:1;overflow-y:auto;padding:12px 0}
+.scene-label{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);padding:0 16px;margin-bottom:8px}
+.scene-item{display:flex;align-items:center;gap:9px;padding:9px 16px;cursor:pointer;transition:.15s;border-left:2px solid transparent}
+.scene-item:hover{background:var(--card)}
+.scene-item.active{background:rgba(212,168,67,.05);border-left-color:var(--gold)}
+.scene-num{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--muted);line-height:1;min-width:22px}
+.scene-item.active .scene-num{color:var(--gold)}
+.scene-meta{flex:1;overflow:hidden}
+.scene-preview{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--text);margin-bottom:2px}
+.scene-st{font-size:10px;color:var(--muted)}
+.sdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.sdot.pending{background:var(--muted)}
+.sdot.generating_image,.sdot.generating_clips{background:var(--amber);animation:pulse 1.1s infinite}
+.sdot.confirming{background:var(--blue);animation:pulse 1.5s infinite}
+.sdot.done{background:var(--green)}
+.sdot.error{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+.btn-add{margin:12px 16px;padding:10px;background:transparent;border:1px dashed var(--border2);border-radius:5px;color:var(--muted);cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;transition:.15s;width:calc(100% - 32px);display:flex;align-items:center;justify-content:center;gap:7px}
+.btn-add:hover{border-color:var(--gold);color:var(--gold);background:rgba(212,168,67,.04)}
+.btn-add:disabled{opacity:.35;cursor:not-allowed}
+
+/* main */
+.main{padding:28px 36px;overflow-y:auto}
+
+/* cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:22px;margin-bottom:18px}
+.card-title{font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:3px;color:var(--gold);margin-bottom:14px;display:flex;align-items:center;gap:10px}
+
+/* buttons */
+.btn{padding:9px 18px;border-radius:5px;border:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;text-transform:uppercase;transition:.15s;display:inline-flex;align-items:center;gap:7px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-gold{background:var(--gold);color:#08090c;font-weight:600}
+.btn-gold:hover:not(:disabled){background:var(--gold2);box-shadow:0 0 18px rgba(212,168,67,.25)}
+.btn-outline{background:transparent;border:1px solid var(--border2);color:var(--text)}
+.btn-outline:hover:not(:disabled){border-color:var(--blue);color:var(--blue)}
+.btn-green{background:var(--green);color:#050e08}
+.btn-green:hover:not(:disabled){background:#4dcc88}
+.btn-red{background:transparent;border:1px solid var(--red);color:var(--red)}
+.btn-red:hover:not(:disabled){background:rgba(224,85,85,.1)}
+
+/* textarea */
+.ta{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:13px 15px;color:var(--white);font-family:'Lora',serif;font-size:14px;line-height:1.65;resize:vertical;min-height:80px;outline:none;transition:.15s}
+.ta:focus{border-color:var(--blue)}
+.ta::placeholder{color:var(--muted);font-style:italic}
+
+/* progress */
+.prog-wrap{background:var(--surface);border-radius:3px;height:3px;overflow:hidden;margin:12px 0}
+.prog-bar{height:100%;background:linear-gradient(90deg,var(--blue),var(--gold));border-radius:3px;transition:width .5s}
+
+/* status badge */
+.sbadge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:12px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase}
+.sbadge.gen{background:rgba(224,144,48,.1);color:var(--amber);border:1px solid rgba(224,144,48,.2)}
+.sbadge.confirm{background:rgba(74,144,217,.1);color:var(--blue);border:1px solid rgba(74,144,217,.2)}
+.sbadge.done{background:rgba(61,184,122,.1);color:var(--green);border:1px solid rgba(61,184,122,.2)}
+.sbadge.error{background:rgba(224,85,85,.1);color:var(--red);border:1px solid rgba(224,85,85,.2)}
+
+/* prompt chips */
+.chips{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-top:10px}
+.chip{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 11px}
+.chip-n{font-family:'Bebas Neue',sans-serif;font-size:21px;color:var(--gold);line-height:1;margin-bottom:5px}
+.chip-t{font-family:'Lora',serif;font-size:11px;color:var(--muted);line-height:1.5}
+
+/* image confirm */
+.img-confirm{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.gen-img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:7px;border:2px solid var(--border);background:var(--surface);display:block}
+.confirm-side{display:flex;flex-direction:column;gap:12px}
+.confirm-side h3{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;color:var(--white)}
+.confirm-side p{font-family:'Lora',serif;font-size:13px;color:var(--muted);line-height:1.6}
+.sep{border:none;border-top:1px solid var(--border);margin:4px 0}
+
+/* clip strip */
+.clip-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.clip-thumb{flex-shrink:0;width:136px}
+.clip-thumb video,.clip-placeholder{width:136px;height:78px;border-radius:5px;border:1px solid var(--border);background:var(--surface);display:block;object-fit:cover}
+.clip-placeholder{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:18px}
+.clip-lbl{font-size:10px;color:var(--muted);text-align:center;margin-top:4px;letter-spacing:1px}
+
+/* project header */
+.proj-header{display:flex;align-items:center;gap:14px;margin-bottom:26px}
+.proj-header h2{font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:4px;color:var(--white)}
+
+/* final video */
+.final-video video{width:100%;border-radius:8px;border:2px solid var(--gold);box-shadow:0 0 40px rgba(212,168,67,.12)}
+
+/* empty */
+.empty{text-align:center;padding:80px 40px;color:var(--muted)}
+.empty .icon{font-size:56px;margin-bottom:18px;opacity:.25}
+.empty h2{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:4px;color:var(--text);margin-bottom:8px}
+.empty p{font-family:'Lora',serif;font-size:14px}
+
+/* spinner */
+.spin{width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* toast */
+#toast{position:fixed;bottom:20px;right:20px;background:var(--card);border:1px solid var(--border2);border-radius:7px;padding:11px 16px;font-size:12px;color:var(--text);opacity:0;transform:translateY(8px);transition:.25s;z-index:9998;max-width:300px}
+#toast.show{opacity:1;transform:translateY(0)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CineForge</h1>
+  <span class="sub">AI Video Pipeline</span>
+  <div class="gpu-badge">
+    <span class="gpu-dot" id="gpu-dot"></span>
+    <span id="gpu-label">GPU READY</span>
+  </div>
+</header>
+
+<div class="workspace">
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <div class="sidebar-label">Projects</div>
+      <div class="proj-list" id="proj-list"></div>
+      <div class="new-proj">
+        <input type="text" id="proj-name" placeholder="New project…" />
+        <button class="btn btn-gold" onclick="createProject()" style="padding:7px 11px">+</button>
+      </div>
+    </div>
+    <div class="sidebar-scenes">
+      <div class="scene-label">Scenes</div>
+      <div id="scene-list"></div>
+      <button class="btn-add" id="btn-add" onclick="showAddScene()" disabled>＋ Add Scene</button>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="empty">
+      <div class="icon">🎬</div>
+      <h2>Welcome to CineForge</h2>
+      <p>Create a project, add scenes, and let AI build your film.</p>
+    </div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = '';
+let S = { pid: null, project: null, sceneIdx: null, polls: {} };
+
+// ── utils 
+async function api(method, path, body) {
+  const o = { method, headers: {'Content-Type':'application/json'} };
+  if (body !== undefined) o.body = JSON.stringify(body);
+  const r = await fetch(API + path, o);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function toast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderColor = type==='error' ? 'var(--red)' : type==='success' ? 'var(--green)' : 'var(--border2)';
+  t.classList.add('show');
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function setGpu(busy) {
+  document.getElementById('gpu-dot').className = 'gpu-dot' + (busy ? ' busy' : '');
+  document.getElementById('gpu-label').textContent = busy ? 'GPU BUSY' : 'GPU READY';
+}
+
+const STATUS_LABEL = {
+  pending:'Pending', generating_image:'Generating image…',
+  confirming:'Awaiting confirmation', generating_clips:'Generating clips…',
+  done:'Done ✓', error:'Error'
+};
+
+// ── projects 
+async function loadProjects() {
+  const projects = await api('GET', '/projects');
+  const el = document.getElementById('proj-list');
+  el.innerHTML = '';
+  projects.forEach(p => {
+    const d = document.createElement('div');
+    d.className = 'proj-item' + (p.project_id === S.pid ? ' active' : '');
+    d.innerHTML = `<span class="pname">${p.title}</span><span class="pcount">${(p.scenes||[]).length} sc</span>`;
+    d.onclick = () => selectProject(p.project_id);
+    el.appendChild(d);
+  });
+}
+
+async function createProject() {
+  const inp = document.getElementById('proj-name');
+  const title = inp.value.trim() || 'Untitled Project';
+  const p = await api('POST', '/projects', { title });
+  inp.value = '';
+  await loadProjects();
+  selectProject(p.project_id);
+  toast(`"${title}" created`, 'success');
+}
+
+async function selectProject(pid) {
+  S.pid = pid; S.sceneIdx = null;
+  await refreshProject();
+  document.getElementById('btn-add').disabled = false;
+  await loadProjects();
+}
+
+async function refreshProject() {
+  if (!S.pid) return;
+  S.project = await api('GET', `/projects/${S.pid}`);
+  renderSceneList();
+  if (S.sceneIdx !== null) renderScenePage(S.sceneIdx);
+  else renderDashboard();
+}
+
+// ── scene list sidebar ────────────────────────────────────────────────────────
+function renderSceneList() {
+  const el = document.getElementById('scene-list');
+  el.innerHTML = '';
+  (S.project.scenes || []).forEach((sc, i) => {
+    const d = document.createElement('div');
+    d.className = 'scene-item' + (S.sceneIdx === i ? ' active' : '');
+    d.id = `si-${i}`;
+    d.innerHTML = `
+      <span class="scene-num">${String(i+1).padStart(2,'0')}</span>
+      <div class="scene-meta">
+        <div class="scene-preview">${sc.raw_prompt || 'Scene '+(i+1)}</div>
+        <div class="scene-st">${STATUS_LABEL[sc.status] || sc.status}</div>
+      </div>
+      <span class="sdot ${sc.status}"></span>`;
+    d.onclick = () => { S.sceneIdx = i; renderSceneList(); renderScenePage(i); };
+    el.appendChild(d);
+  });
+}
+
+// ── dashboard ─────────────────────────────────────────────────────────────────
+function renderDashboard() {
+  const p = S.project;
+  const done = (p.scenes||[]).filter(s=>s.status==='done').length;
+  const total = (p.scenes||[]).length;
+  document.getElementById('main').innerHTML = `
+    <div class="proj-header">
+      <h2>${p.title}</h2>
+      <span class="sbadge ${p.final_status==='done'?'done':'gen'}">${done}/${total} scenes</span>
+      ${done>=1 ? `<button class="btn btn-gold" style="margin-left:auto" onclick="finalizeProject()">⚡ Finalize Film</button>` : ''}
+    </div>
+
+    ${p.final_status==='done' && p.final_video_url ? `
+    <div class="card">
+      <div class="card-title">🎞 Final Film</div>
+      <div class="final-video"><video controls src="${p.final_video_url}"></video></div>
+      <div style="margin-top:12px">
+        <a href="/projects/${p.project_id}/final-video" class="btn btn-outline" download>⬇ Download</a>
+      </div>
+    </div>` : p.final_status==='processing' ? `
+    <div class="card">
+      <div class="card-title"><span class="spin"></span> Applying Lightning Transitions…</div>
+      <div class="prog-wrap"><div class="prog-bar" style="width:60%;animation:prog-pulse 2s infinite alternate"></div></div>
+    </div>` : ''}
+
+    <div class="card">
+      <div class="card-title">📋 Scenes</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:11px">
+        ${(p.scenes||[]).map((sc,i) => `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:14px;cursor:pointer"
+               onclick="S.sceneIdx=${i};renderSceneList();renderScenePage(${i})">
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:19px;color:var(--gold);letter-spacing:2px">SCENE ${i+1}</div>
+            <div style="font-family:'Lora',serif;font-size:11px;color:var(--muted);margin:4px 0 8px;line-height:1.5">${(sc.raw_prompt||'').substring(0,55)}…</div>
+            <span class="sdot ${sc.status}" style="display:inline-block"></span>
+            <span style="font-size:10px;color:var(--muted);margin-left:5px">${STATUS_LABEL[sc.status]||sc.status}</span>
+          </div>`).join('')}
+        <div style="background:var(--surface);border:1px dashed var(--border2);border-radius:7px;padding:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px"
+             onclick="showAddScene()">＋ Add Scene</div>
+      </div>
+    </div>`;
+
+  if (p.final_status === 'processing') setTimeout(refreshProject, 4000);
+}
+
+// ── add scene ─────────────────────────────────────────────────────────────────
+function showAddScene() {
+  S.sceneIdx = null; renderSceneList();
+  document.getElementById('main').innerHTML = `
+    <div class="proj-header"><h2>New Scene</h2></div>
+    <div class="card">
+      <div class="card-title">✍️ Scene Description</div>
+      <p style="font-family:'Lora',serif;font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.65">
+        Describe this scene in plain language. Groq will expand it into 5 sequential
+        clip prompts and a detailed keyframe image prompt.
+      </p>
+      <textarea class="ta" id="scene-prompt" rows="4"
+        placeholder="e.g. A samurai walks through a foggy bamboo forest at dawn, cherry blossoms falling around him…"></textarea>
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <button class="btn btn-gold" id="btn-gen-scene" onclick="createScene()">🎬 Generate Scene</button>
+        <button class="btn btn-outline" onclick="renderDashboard()">Cancel</button>
+      </div>
+    </div>`;
+}
+
+async function createScene() {
+  const prompt = document.getElementById('scene-prompt').value.trim();
+  if (!prompt) { toast('Enter a scene description first', 'error'); return; }
+  const btn = document.getElementById('btn-gen-scene');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Enhancing + Generating Image…';
+  try {
+    const scene = await api('POST', `/projects/${S.pid}/scenes`, { prompt });
+    S.sceneIdx = scene.scene_idx;
+    await refreshProject();
+    toast('Scene created! Generating source image…', 'success');
+    startPoll(scene.scene_idx);
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '🎬 Generate Scene';
+  }
+}
+
+// ── scene page ────────────────────────────────────────────────────────────────
+async function renderScenePage(idx) {
+  const scene = await api('GET', `/projects/${S.pid}/scenes/${idx}`);
+  let html = `
+    <div class="proj-header">
+      <h2>Scene ${idx+1}</h2>
+      <span class="sbadge ${['done'].includes(scene.status)?'done':scene.status==='error'?'error':scene.status==='confirming'?'confirm':'gen'}">
+        ${STATUS_LABEL[scene.status]||scene.status}
+      </span>
+      <button class="btn btn-outline" style="margin-left:auto" onclick="S.sceneIdx=null;renderSceneList();renderDashboard()">← Project</button>
+    </div>`;
+
+  // Enhanced prompts
+  if (scene.enhanced_prompts?.length) {
+    html += `<div class="card">
+      <div class="card-title">🧠 Enhanced Prompts</div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:10px">Raw: <em style="font-family:'Lora',serif;color:var(--text)">${scene.raw_prompt}</em></p>
+      <div class="chips">
+        ${scene.enhanced_prompts.map((p,i) => `
+          <div class="chip">
+            <div class="chip-n">${String(i+1).padStart(2,'0')}</div>
+            <div class="chip-t">${p.substring(0,110)}${p.length>110?'…':''}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  // Generating image
+  if (scene.status === 'generating_image') {
+    setGpu(true);
+    html += `<div class="card">
+      <div class="card-title"><span class="spin"></span> Generating Keyframe Image…</div>
+      <p style="font-family:'Lora',serif;color:var(--muted)">Running txt2img on ComfyUI (LTX-2.3). Usually 20–60 seconds.</p>
+      <div class="prog-wrap"><div class="prog-bar" style="width:35%"></div></div>
+    </div>`;
+    startPoll(idx);
+  }
+
+  // Confirming
+  if (scene.status === 'confirming' && scene.source_image_url) {
+    setGpu(false);
+    html += `<div class="card">
+      <div class="card-title">🖼 Confirm Source Image</div>
+      <div class="img-confirm">
+        <img class="gen-img" src="${scene.source_image_url}" alt="Generated keyframe" />
+        <div class="confirm-side">
+          <h3>Happy with this?</h3>
+          <p>This is the starting keyframe for all 5 video clips in this scene.
+             Approve to begin video generation, or reject to regenerate.</p>
+          <button class="btn btn-green" onclick="confirmImg(${idx}, true)">✓ Looks Good — Generate Clips</button>
+          <button class="btn btn-red"   onclick="confirmImg(${idx}, false)">✗ Regenerate (same prompt)</button>
+          <hr class="sep"/>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:7px">Try a different description:</div>
+          <textarea class="ta" id="regen-prompt" rows="2" style="min-height:56px"
+            placeholder="${scene.raw_prompt}"></textarea>
+          <button class="btn btn-outline" style="margin-top:6px" onclick="regenNewPrompt(${idx})">↺ Regen with New Prompt</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Generating clips
+  if (scene.status === 'generating_clips') {
+    setGpu(true);
+    const done = scene.clips?.length || 0;
+    html += `<div class="card">
+      <div class="card-title"><span class="spin"></span> Generating Clips (${done}/5)…</div>
+      <div class="prog-wrap"><div class="prog-bar" style="width:${(done/5)*100}%"></div></div>
+      <div class="clip-strip">
+        ${Array.from({length:5},(_,i)=>{
+          const url = scene.clip_urls?.[i];
+          return url
+            ? `<div class="clip-thumb"><video src="${url}" autoplay muted loop playsinline></video><div class="clip-lbl">CLIP ${i+1}</div></div>`
+            : `<div class="clip-thumb"><div class="clip-placeholder">${i<done?'●':'○'}</div><div class="clip-lbl">CLIP ${i+1}</div></div>`;
+        }).join('')}
+      </div>
+    </div>`;
+    startPoll(idx);
+  }
+
+  // Done
+  if (scene.status === 'done') {
+    setGpu(false);
+    html += `<div class="card">
+      <div class="card-title">🎬 Scene Complete</div>
+      ${scene.scene_video_url
+        ? `<video controls style="width:100%;border-radius:7px;margin-bottom:14px" src="${scene.scene_video_url}"></video>`
+        : ''}
+      <div class="clip-strip">
+        ${(scene.clip_urls||[]).map((url,i)=>`
+          <div class="clip-thumb">
+            <video src="${url}" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0"></video>
+            <div class="clip-lbl">CLIP ${i+1}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  // Error
+  if (scene.status === 'error') {
+    setGpu(false);
+    html += `<div class="card" style="border-color:var(--red)">
+      <div class="card-title" style="color:var(--red)">⚠ Generation Error</div>
+      <p style="font-family:'Lora',serif;color:var(--muted)">${scene.error || 'Unknown error'}</p>
+      <div style="margin-top:12px;display:flex;gap:10px">
+        <button class="btn btn-outline" onclick="retryScene(${idx})">↺ Retry</button>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('main').innerHTML = html;
+}
+
+// ── confirm / regen ───────────────────────────────────────────────────────────
+async function confirmImg(idx, confirmed) {
+  try {
+    await api('POST', `/projects/${S.pid}/scenes/${idx}/confirm`, { confirmed });
+    toast(confirmed ? 'Starting clip generation…' : 'Regenerating image…', 'success');
+    await refreshProject();
+    startPoll(idx);
+  } catch(e) { toast('Error: '+e.message,'error'); }
+}
+
+async function regenNewPrompt(idx) {
+  const prompt = document.getElementById('regen-prompt').value.trim();
+  if (!prompt) { toast('Enter a new description','error'); return; }
+  try {
+    await api('POST', `/projects/${S.pid}/scenes/${idx}/regenerate`, { prompt });
+    toast('Regenerating with new prompt…');
+    await refreshProject();
+    startPoll(idx);
+  } catch(e) { toast('Error: '+e.message,'error'); }
+}
+
+async function retryScene(idx) {
+  const scene = S.project.scenes[idx];
+  if (!scene) return;
+  const imgPrompt = scene.enhanced_image_prompt || scene.raw_prompt;
+  // Reset to generating_image by calling regenerate with same prompt
+  await api('POST', `/projects/${S.pid}/scenes/${idx}/regenerate`, { prompt: scene.raw_prompt });
+  toast('Retrying…');
+  await refreshProject();
+  startPoll(idx);
+}
+
+// ── finalize ──────────────────────────────────────────────────────────────────
+async function finalizeProject() {
+  try {
+    await api('POST', `/projects/${S.pid}/finalize`);
+    toast('⚡ Stitching scenes with lightning transitions…','success');
+    await refreshProject();
+    setTimeout(pollFinalize, 5000);
+  } catch(e) { toast('Error: '+e.message,'error'); }
+}
+
+async function pollFinalize() {
+  const p = await api('GET', `/projects/${S.pid}`);
+  S.project = p;
+  if (p.final_status === 'processing') {
+    setTimeout(pollFinalize, 4000);
+  } else {
+    renderSceneList();
+    if (S.sceneIdx === null) renderDashboard();
+  }
+}
+
+// ── polling ───────────────────────────────────────────────────────────────────
+function startPoll(idx) {
+  const key = `s${idx}`;
+  if (S.polls[key]) return;
+  S.polls[key] = true;
+
+  const DONE_STATES = ['done','error','confirming'];
+
+  const tick = async () => {
+    if (!S.polls[key]) return;
+    try {
+      const sc = await api('GET', `/projects/${S.pid}/scenes/${idx}`);
+      // update sidebar dot
+      const pill = document.getElementById(`si-${idx}`);
+      if (pill) {
+        const dot = pill.querySelector('.sdot');
+        if (dot) dot.className = `sdot ${sc.status}`;
+        const st = pill.querySelector('.scene-st');
+        if (st) st.textContent = STATUS_LABEL[sc.status]||sc.status;
+      }
+      // update GPU badge
+      const gpuBusy = ['generating_image','generating_clips'].includes(sc.status);
+      setGpu(gpuBusy);
+      // re-render if active
+      if (S.sceneIdx === idx) await renderScenePage(idx);
+      if (DONE_STATES.includes(sc.status)) {
+        delete S.polls[key];
+        // also refresh project to update dashboard counts
+        S.project = await api('GET', `/projects/${S.pid}`);
+        return;
+      }
+    } catch(e) {}
+    setTimeout(tick, 3000);
+  };
+  setTimeout(tick, 3000);
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+loadProjects();
+</script>
+</body>
+</html>
