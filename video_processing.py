@@ -8,17 +8,79 @@ Video processing — two stages:
   2. concatenate_scenes(scenes, output)
      Stitches all scene videos into the final film with a lightning-flash
      white-burst transition between each scene, implemented as an ffmpeg
-     xfade + curves filter chain.
+     xfade filter chain.
+
+ROOT CAUSE FIX:
+  The original code used `offset=0` in every xfade call, which made ALL
+  transitions fire at t=0, causing scenes to collapse and overlap at the
+  very beginning — producing only ~24s from 3×20s inputs instead of ~60s.
+
+  The xfade `offset` parameter means: "start the transition this many
+  seconds into the COMBINED output timeline so far."  It must be
+  accumulated correctly across every transition:
+
+      offset_1 = dur(scene_1) - flash_dur
+      offset_2 = dur(scene_1) + dur(scene_2) - 2 × flash_dur
+      offset_k = Σ dur(scene_1..k) - k × flash_dur
+
+  Each scene's true duration is measured with ffprobe before building
+  the filter, so the maths always uses real values instead of assumptions.
 """
 
+import json
 import subprocess
+import shutil
 import tempfile
 from pathlib import Path
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _get_duration(video_path: Path) -> float:
+    """
+    Returns the video stream duration (seconds) of video_path using ffprobe.
+    Raises RuntimeError if ffprobe fails or no video stream is found.
+    """
+    cmd = [
+        "ffprobe", "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        str(video_path),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"ffprobe failed on {video_path}:\n{r.stderr}")
+
+    info = json.loads(r.stdout)
+    for stream in info.get("streams", []):
+        if stream.get("codec_type") == "video":
+            raw = stream.get("duration") or stream.get("nb_frames")
+            if raw:
+                return float(raw)
+
+    # Fallback: read container duration
+    cmd2 = [
+        "ffprobe", "-v", "quiet",
+        "-print_format", "json",
+        "-show_format",
+        str(video_path),
+    ]
+    r2 = subprocess.run(cmd2, capture_output=True, text=True)
+    if r2.returncode == 0:
+        fmt = json.loads(r2.stdout).get("format", {})
+        if "duration" in fmt:
+            return float(fmt["duration"])
+
+    raise ValueError(f"Could not determine duration of {video_path}")
 
 
 # ── 1. Assemble 5 clips → 20s scene ──────────────────────────────────────────
 
 def assemble_scene(clip_paths: list[Path], output_path: Path) -> Path:
+    """
+    Concatenates clip_paths in order into output_path.
+    Tries stream-copy first (fast); falls back to H.264 re-encode.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
@@ -57,22 +119,38 @@ def assemble_scene(clip_paths: list[Path], output_path: Path) -> Path:
 
 # ── 2. Concatenate scenes with lightning-flash transition ─────────────────────
 
-def _lightning_filter(n: int, fps: int = 24) -> tuple[str, str]:
+def _lightning_filter(
+    n: int,
+    durations: list[float],
+    fps: int = 20,
+    flash_dur: float = 0.4,
+) -> tuple[str, str]:
     """
     Builds an ffmpeg filter_complex string that:
       - Normalises every scene to 1920×1080 @ fps
-      - Applies an xfade between consecutive scenes, then overlays a
-        white-burst via the curves filter to simulate a lightning flash
+      - Chains xfade=fadewhite transitions between consecutive scenes
 
-    Returns (filter_complex_string, final_stream_label).
+    CRITICAL: offset for each xfade is accumulated correctly so total
+    output duration equals the sum of all scene durations minus the
+    overlap introduced by each transition.
+
+    offset formula:
+      offset_i = Σ(dur[0..i-1]) - i × flash_dur
+                 (sum of all PREVIOUS scene durations minus transitions so far)
+
+    Example — 3 scenes × 20s, flash_dur=0.4s:
+      offset_1 = 20 - 0.4            = 19.6 s
+      offset_2 = 20 + 20 - 2×0.4    = 39.2 s
+      total output ≈ 39.2 + 20       = 59.2 s  ✓
+
+    Returns (filter_complex_string, final_output_label).
     """
-    flash_dur = 0.4   # seconds of white flash at each scene boundary
-    parts     = []
-    labels    = []
+    parts  = []
+    labels = []
 
-    # Step 1 — normalise each input
+    # Step 1 — normalise every input to the same resolution / fps / pix_fmt
     for i in range(n):
-        lbl = f"n{i}"
+        lbl = f"norm{i}"
         parts.append(
             f"[{i}:v]"
             f"scale=1920:1080:force_original_aspect_ratio=decrease,"
@@ -83,48 +161,65 @@ def _lightning_filter(n: int, fps: int = 24) -> tuple[str, str]:
         )
         labels.append(lbl)
 
-    # Step 2 — chain xfade + lightning curves between consecutive scenes
-    current = labels[0]
+    # Step 2 — chain xfade transitions with CORRECT cumulative offsets
+    current           = labels[0]
+    accumulated_offset = 0.0          # tracks where we are in the output timeline
+
     for i in range(1, n):
-        out = f"t{i}"
-        # xfade transition (fade to white)
+        # Move offset forward by the PREVIOUS scene's duration minus one flash
+        accumulated_offset += durations[i - 1] - flash_dur
+
+        out_label = f"xf{i}"
         xfade = (
             f"[{current}][{labels[i]}]"
-            f"xfade=transition=fadewhite:duration={flash_dur}:offset=0"
-            f"[xf{i}]"
-        )
-        # curves: spike to white briefly then return — lightning feel
-        # control points: time 0→normal, 0.15→white, 0.35→normal, 1→normal
-        curve = (
-            f"[xf{i}]"
-            f"curves=all='0/0 0.15/1 0.35/0 1/1'"
-            f"[{out}]"
+            f"xfade=transition=fadewhite"
+            f":duration={flash_dur}"
+            f":offset={accumulated_offset:.4f}"          # ← THE FIX
+            f"[{out_label}]"
         )
         parts.append(xfade)
-        parts.append(curve)
-        current = out
+        current = out_label
 
     return ";\n".join(parts), f"[{current}]"
 
 
-def concatenate_scenes(scene_paths: list[Path], output_path: Path, fps: int = 24) -> Path:
+def concatenate_scenes(
+    scene_paths: list[Path],
+    output_path: Path,
+    fps: int = 20,
+) -> Path:
     """
     Concatenate all scene videos with lightning flash transitions between them.
-    Single scene: just copies the file. Multiple scenes: full filter chain.
-    Falls back to plain concat if the filter chain fails.
+
+    • Single scene  → plain file copy (no re-encode).
+    • Multi-scene   → xfade filter chain with correct offsets.
+    • On filter failure → falls back to plain concat (no transitions).
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if len(scene_paths) == 1:
-        import shutil
         shutil.copy2(scene_paths[0], output_path)
         return output_path
+
+    # Probe every scene's real duration before building the filter
+    durations = []
+    for sp in scene_paths:
+        dur = _get_duration(sp)
+        durations.append(dur)
+        print(f"  Scene duration: {sp.name} = {dur:.2f}s")
+
+    expected_total = sum(durations) - (len(scene_paths) - 1) * 0.4
+    print(f"  Expected output duration: {expected_total:.2f}s "
+          f"({len(scene_paths)} scenes × ~{sum(durations)/len(scene_paths):.1f}s "
+          f"with {len(scene_paths)-1} × 0.4s flash)")
 
     input_args = []
     for sp in scene_paths:
         input_args += ["-i", str(sp)]
 
-    filter_complex, final_label = _lightning_filter(len(scene_paths), fps)
+    filter_complex, final_label = _lightning_filter(
+        len(scene_paths), durations, fps
+    )
 
     cmd = [
         "ffmpeg", "-y",
@@ -138,13 +233,20 @@ def concatenate_scenes(scene_paths: list[Path], output_path: Path, fps: int = 24
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
     if r.returncode != 0:
-        # Fallback: plain concat, no transition
+        print(f"Lightning filter failed, falling back to plain concat:\n{r.stderr}")
         _plain_concat(scene_paths, output_path)
+    else:
+        # Verify actual output duration
+        try:
+            actual = _get_duration(output_path)
+            print(f"  ✅ Final video duration: {actual:.2f}s")
+        except Exception:
+            pass
 
     return output_path
 
 
-def _plain_concat(scene_paths: list[Path], output_path: Path):
+def _plain_concat(scene_paths: list[Path], output_path: Path) -> None:
     """Emergency fallback — plain concat with no transitions."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         lf = Path(f.name)

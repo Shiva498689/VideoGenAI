@@ -12,7 +12,7 @@ Full pipeline per scene
  2. GET  /projects/{pid}/scenes/{idx}
       → Poll until status == "confirming"
       → Response includes source_image_url for the UI to display
- 
+
  3. POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": true }
       → Approved: starts 5-clip generation chain in background
     POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": false }
@@ -27,6 +27,11 @@ Full pipeline per scene
 
  5. POST /projects/{pid}/finalize
       → Stitches all done scenes with lightning-flash transition → final.mp4
+
+FIXES APPLIED:
+  - extract_last_frame, assemble_scene, concatenate_scenes all use
+    subprocess.run() (blocking). Wrapped in asyncio.to_thread() so they
+    never freeze the FastAPI event loop during long video operations.
 """
 
 import asyncio
@@ -47,7 +52,7 @@ from video_processing import assemble_scene, concatenate_scenes
 from workflows import build_image_workflow, build_video_workflow
 
 # ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(title="CineForge — AI Video Pipeline", version="3.0.0")
+app = FastAPI(title="CineForge — AI Video Pipeline", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -117,7 +122,6 @@ async def create_scene(pid: str, req: SceneReq, bg: BackgroundTasks):
     if not storage.get_project(pid):
         raise HTTPException(404, "Project not found")
 
-    # Groq — both calls happen before we create the scene record
     try:
         clip_prompts = await enhance_prompt(req.prompt)
         img_prompt   = await enhance_image_prompt(req.prompt)
@@ -157,11 +161,6 @@ def _hydrate_scene(pid: str, s: dict) -> dict:
 # ── Scene: confirm / reject source image ─────────────────────────────────────
 @app.post("/projects/{pid}/scenes/{scene_idx}/confirm")
 async def confirm_image(pid: str, scene_idx: int, req: ConfirmReq, bg: BackgroundTasks):
-    """
-    Step 3a.
-    confirmed=true  → kick off 5-clip generation chain.
-    confirmed=false → regenerate source image with the same enhanced prompt.
-    """
     scene = storage.get_scene(pid, scene_idx)
     if not scene:
         raise HTTPException(404, "Scene not found")
@@ -169,13 +168,11 @@ async def confirm_image(pid: str, scene_idx: int, req: ConfirmReq, bg: Backgroun
         raise HTTPException(400, f"Expected status 'confirming', got '{scene['status']}'")
 
     if not req.confirmed:
-        # Re-generate image (same prompt)
         img_prompt = scene.get("enhanced_image_prompt") or scene["raw_prompt"]
         storage.update_scene(pid, scene_idx, status="generating_image", error=None)
         bg.add_task(_gen_source_image, pid, scene_idx, img_prompt)
         return {"status": "generating_image", "message": "Regenerating source image…"}
 
-    # Start clip generation
     storage.update_scene(pid, scene_idx, status="generating_clips", error=None)
     bg.add_task(_gen_clips, pid, scene_idx)
     return {"status": "generating_clips", "message": "Generating 5 clips…"}
@@ -184,10 +181,6 @@ async def confirm_image(pid: str, scene_idx: int, req: ConfirmReq, bg: Backgroun
 # ── Scene: regenerate with new prompt ─────────────────────────────────────────
 @app.post("/projects/{pid}/scenes/{scene_idx}/regenerate")
 async def regenerate_image(pid: str, scene_idx: int, req: SceneReq, bg: BackgroundTasks):
-    """
-    Step 3b — user provides a revised description.
-    Re-enhances the prompt and regenerates the source image.
-    """
     scene = storage.get_scene(pid, scene_idx)
     if not scene:
         raise HTTPException(404, "Scene not found")
@@ -209,10 +202,6 @@ async def regenerate_image(pid: str, scene_idx: int, req: SceneReq, bg: Backgrou
 # ── Finalize ──────────────────────────────────────────────────────────────────
 @app.post("/projects/{pid}/finalize")
 async def finalize_project(pid: str, bg: BackgroundTasks):
-    """
-    Step 5 — stitch all done scenes into the final film with lightning transitions.
-    Runs in the background; poll GET /projects/{pid} for final_status.
-    """
     project = storage.get_project(pid)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -234,22 +223,24 @@ async def download_final(pid: str):
         raise HTTPException(404, "Project not found")
     if not p.get("final_video"):
         raise HTTPException(404, "Final video not ready yet")
-    return FileResponse(p["final_video"], media_type="video/mp4",
-                        filename=f"{p['title'].replace(' ','_')}_final.mp4")
+    return FileResponse(
+        p["final_video"],
+        media_type="video/mp4",
+        filename=f"{p['title'].replace(' ', '_')}_final.mp4",
+    )
 
 
 # ── Background tasks ──────────────────────────────────────────────────────────
 
 async def _gen_source_image(pid: str, scene_idx: int, image_prompt: str):
     """
-    Runs the txt2img workflow on ComfyUI (GPU_LOCK serialises with video jobs).
+    Runs the txt2img workflow on ComfyUI.
     On success → status becomes 'confirming' so the UI can show the image.
     """
     try:
         workflow  = build_image_workflow(image_prompt)
         dest_path = storage.source_image_path(pid, scene_idx)
         await comfy.run_job(workflow, dest_path, timeout=1000)
-
         storage.update_scene(pid, scene_idx,
                              source_image=str(dest_path),
                              status="confirming")
@@ -268,8 +259,8 @@ async def _gen_clips(pid: str, scene_idx: int):
       clip_3 ← last_frame(clip_2)   + enhanced_prompts[3]
       clip_4 ← last_frame(clip_3)   + enhanced_prompts[4]
 
-    All calls go through comfy.run_job() which holds GPU_LOCK, so they
-    naturally queue behind any concurrent image-gen requests.
+    FIX: extract_last_frame and assemble_scene use subprocess.run (blocking).
+    Both are wrapped in asyncio.to_thread() to avoid freezing the event loop.
     """
     try:
         scene      = storage.get_scene(pid, scene_idx)
@@ -290,17 +281,17 @@ async def _gen_clips(pid: str, scene_idx: int):
             storage.add_clip(pid, scene_idx, str(clip_path))
             storage.update_scene(pid, scene_idx, last_completed_clip=i)
 
-            # Prepare seed for next clip
+            # Prepare seed for next clip — blocking ffmpeg off the event loop
             if i < settings.CLIPS_PER_SCENE - 1:
                 last_frame = storage.last_frame_path(pid, scene_idx)
-                extract_last_frame(clip_path, last_frame)
+                await asyncio.to_thread(extract_last_frame, clip_path, last_frame)
                 seed_image = last_frame
 
-        # Assemble 5 clips → 20s scene.mp4
+        # Assemble 5 clips → 20s scene.mp4 — blocking ffmpeg off the event loop
         clip_paths  = [storage.clip_path(pid, scene_idx, i)
                        for i in range(settings.CLIPS_PER_SCENE)]
         scene_video = storage.scene_video_path(pid, scene_idx)
-        assemble_scene(clip_paths, scene_video)
+        await asyncio.to_thread(assemble_scene, clip_paths, scene_video)
 
         storage.update_scene(pid, scene_idx,
                              scene_video=str(scene_video),
@@ -310,11 +301,16 @@ async def _gen_clips(pid: str, scene_idx: int):
 
 
 async def _finalize(pid: str, done_scenes: list):
-    """Concatenates all done scene videos with lightning-flash transitions."""
+    """
+    Concatenates all done scene videos with lightning-flash transitions.
+
+    FIX: concatenate_scenes uses subprocess.run (blocking).
+    Wrapped in asyncio.to_thread() to avoid freezing the event loop.
+    """
     try:
         scene_paths = [Path(s["scene_video"]) for s in done_scenes]
         out_path    = storage.final_video_path(pid)
-        concatenate_scenes(scene_paths, out_path)
+        await asyncio.to_thread(concatenate_scenes, scene_paths, out_path)
 
         storage.update_project(pid,
                                final_video=str(out_path),
