@@ -1,30 +1,29 @@
+
 """
 Video processing — two stages:
 
   1. assemble_scene(clips, output)
      Concatenates the 5 × 4s clips for one scene into a 20s scene.mp4.
      Uses stream-copy first (fast, lossless); re-encodes as fallback.
+     Audio is preserved in BOTH paths.
 
   2. concatenate_scenes(scenes, output)
      Stitches all scene videos into the final film with a lightning-flash
      white-burst transition between each scene, implemented as an ffmpeg
-     xfade filter chain.
+     xfade + acrossfade filter chain.
 
-ROOT CAUSE FIX:
-  The original code used `offset=0` in every xfade call, which made ALL
-  transitions fire at t=0, causing scenes to collapse and overlap at the
-  very beginning — producing only ~24s from 3×20s inputs instead of ~60s.
+AUDIO HANDLING:
+  - assemble_scene() fast path (-c copy): audio is preserved as-is.
+  - assemble_scene() fallback (re-encode): audio is re-encoded to AAC.
+  - concatenate_scenes(): each scene's audio is normalised to 44100 Hz
+    stereo, then joined with acrossfade matching the video xfade duration.
+  - If a clip has NO audio stream, a silent track is synthesised with
+    aevalsrc=0 so the filter chain never breaks.
+  - _plain_concat() fallback also preserves audio.
 
-  The xfade `offset` parameter means: "start the transition this many
-  seconds into the COMBINED output timeline so far."  It must be
-  accumulated correctly across every transition:
-
-      offset_1 = dur(scene_1) - flash_dur
-      offset_2 = dur(scene_1) + dur(scene_2) - 2 × flash_dur
-      offset_k = Σ dur(scene_1..k) - k × flash_dur
-
-  Each scene's true duration is measured with ffprobe before building
-  the filter, so the maths always uses real values instead of assumptions.
+XFADE OFFSET FIX:
+  offset_i = Σ dur[0..i-1] - i × flash_dur
+  All offsets are accumulated from real ffprobe durations, not guesses.
 """
 
 import json
@@ -38,8 +37,9 @@ from pathlib import Path
 
 def _get_duration(video_path: Path) -> float:
     """
-    Returns the video stream duration (seconds) of video_path using ffprobe.
-    Raises RuntimeError if ffprobe fails or no video stream is found.
+    Returns the video stream duration (seconds) using ffprobe.
+    Falls back to container duration if stream duration is absent.
+    Raises RuntimeError / ValueError if nothing works.
     """
     cmd = [
         "ffprobe", "-v", "quiet",
@@ -58,7 +58,7 @@ def _get_duration(video_path: Path) -> float:
             if raw:
                 return float(raw)
 
-    # Fallback: read container duration
+    # Fallback: container-level duration
     cmd2 = [
         "ffprobe", "-v", "quiet",
         "-print_format", "json",
@@ -74,12 +74,35 @@ def _get_duration(video_path: Path) -> float:
     raise ValueError(f"Could not determine duration of {video_path}")
 
 
+def _has_audio(video_path: Path) -> bool:
+    """
+    Returns True if video_path contains at least one audio stream.
+    """
+    cmd = [
+        "ffprobe", "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        str(video_path),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    info = json.loads(r.stdout)
+    return any(
+        s.get("codec_type") == "audio"
+        for s in info.get("streams", [])
+    )
+
+
 # ── 1. Assemble 5 clips → 20s scene ──────────────────────────────────────────
 
 def assemble_scene(clip_paths: list[Path], output_path: Path) -> Path:
     """
     Concatenates clip_paths in order into output_path.
-    Tries stream-copy first (fast); falls back to H.264 re-encode.
+
+    Fast path  : stream-copy (-c copy) — zero quality loss, audio kept.
+    Fallback   : H.264 + AAC re-encode — fixes codec/resolution mismatches,
+                 audio is re-encoded to AAC 192 k instead of being dropped.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -88,30 +111,37 @@ def assemble_scene(clip_paths: list[Path], output_path: Path) -> Path:
         for cp in clip_paths:
             f.write(f"file '{cp.resolve()}'\n")
 
-    # Fast path — stream copy (no quality loss, no re-encode)
-    cmd = [
+    # ── Fast path: stream copy ─────────────────────────────────────────────
+    cmd_copy = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(list_file),
-        "-c", "copy",
+        "-c", "copy",           # copy video AND audio streams as-is
         str(output_path),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd_copy, capture_output=True, text=True)
 
-    if r.returncode != 0:
-        # Fallback — re-encode to H.264 to fix codec/resolution mismatches
-        cmd2 = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", str(list_file),
-            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-            "-an",
-            str(output_path),
-        ]
-        r2 = subprocess.run(cmd2, capture_output=True, text=True)
-        if r2.returncode != 0:
-            raise RuntimeError(f"assemble_scene failed:\n{r2.stderr}")
+    if r.returncode == 0:
+        list_file.unlink(missing_ok=True)
+        return output_path
+
+    # ── Fallback: re-encode video + audio ──────────────────────────────────
+    print(f"  Stream-copy failed, re-encoding: {r.stderr[-300:]}")
+    cmd_reencode = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(list_file),
+        # Video
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+        # Audio — re-encode to AAC (was -an before, which silenced the clip)
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+        str(output_path),
+    ]
+    r2 = subprocess.run(cmd_reencode, capture_output=True, text=True)
+    if r2.returncode != 0:
+        list_file.unlink(missing_ok=True)
+        raise RuntimeError(f"assemble_scene failed:\n{r2.stderr}")
 
     list_file.unlink(missing_ok=True)
     return output_path
@@ -122,78 +152,123 @@ def assemble_scene(clip_paths: list[Path], output_path: Path) -> Path:
 def _lightning_filter(
     n: int,
     durations: list[float],
+    audio_flags: list[bool],
     fps: int = 20,
     flash_dur: float = 0.4,
-) -> tuple[str, str]:
+    sample_rate: int = 44100,
+) -> tuple[str, str, str]:
     """
     Builds an ffmpeg filter_complex string that:
-      - Normalises every scene to 1920×1080 @ fps
-      - Chains xfade=fadewhite transitions between consecutive scenes
 
-    CRITICAL: offset for each xfade is accumulated correctly so total
-    output duration equals the sum of all scene durations minus the
-    overlap introduced by each transition.
+    VIDEO:
+      - Normalises every scene to 1920×1080 @ fps / yuv420p
+      - Chains xfade=fadewhite transitions with correct cumulative offsets
 
-    offset formula:
-      offset_i = Σ(dur[0..i-1]) - i × flash_dur
-                 (sum of all PREVIOUS scene durations minus transitions so far)
+    AUDIO:
+      - Normalises every scene audio to `sample_rate` Hz, stereo
+      - If a scene has NO audio stream, synthesises silence via aevalsrc
+      - Chains acrossfade transitions matching the video flash duration
 
-    Example — 3 scenes × 20s, flash_dur=0.4s:
-      offset_1 = 20 - 0.4            = 19.6 s
-      offset_2 = 20 + 20 - 2×0.4    = 39.2 s
-      total output ≈ 39.2 + 20       = 59.2 s  ✓
+    XFADE OFFSET FORMULA (avoids the offset=0 collapse bug):
+      offset_i = Σ dur[0..i-1]  -  i × flash_dur
 
-    Returns (filter_complex_string, final_output_label).
+    Example — 3 scenes × 20 s, flash_dur = 0.4 s:
+      offset_1 = 20              - 0.4          = 19.6 s
+      offset_2 = 20 + 20         - 2 × 0.4      = 39.2 s
+      expected total ≈ 59.2 s    ✓
+
+    Returns:
+      (filter_complex_string, final_video_label, final_audio_label)
     """
-    parts  = []
-    labels = []
+    parts      = []
+    v_labels   = []   # normalised video labels
+    a_labels   = []   # normalised audio labels
 
-    # Step 1 — normalise every input to the same resolution / fps / pix_fmt
+    # ── Step 1: normalise every input ─────────────────────────────────────
     for i in range(n):
-        lbl = f"norm{i}"
+        dur = durations[i]
+
+        # Video normalisation
+        v_lbl = f"norm_v{i}"
         parts.append(
             f"[{i}:v]"
             f"scale=1920:1080:force_original_aspect_ratio=decrease,"
             f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,"
             f"fps={fps},"
             f"format=yuv420p"
-            f"[{lbl}]"
+            f"[{v_lbl}]"
         )
-        labels.append(lbl)
+        v_labels.append(v_lbl)
 
-    # Step 2 — chain xfade transitions with CORRECT cumulative offsets
-    current           = labels[0]
-    accumulated_offset = 0.0          # tracks where we are in the output timeline
+        # Audio normalisation
+        # If the scene has no audio, synthesise silence of the same duration.
+        a_lbl = f"norm_a{i}"
+        if audio_flags[i]:
+            parts.append(
+                f"[{i}:a]"
+                f"aresample={sample_rate},"
+                f"pan=stereo|c0=c0|c1=c1,"   # ensure stereo
+                f"aformat=sample_fmts=fltp:channel_layouts=stereo"
+                f"[{a_lbl}]"
+            )
+        else:
+            # aevalsrc generates a silent signal; atrim limits it to scene dur
+            parts.append(
+                f"aevalsrc=0:channel_layout=stereo:sample_rate={sample_rate}"
+                f":duration={dur:.4f}"
+                f"[{a_lbl}]"
+            )
+        a_labels.append(a_lbl)
+
+    # ── Step 2: chain xfade (video) + acrossfade (audio) ──────────────────
+    current_v          = v_labels[0]
+    current_a          = a_labels[0]
+    accumulated_offset = 0.0   # tracks cumulative output timeline position
 
     for i in range(1, n):
-        # Move offset forward by the PREVIOUS scene's duration minus one flash
+        # Advance by the PREVIOUS scene's duration minus one flash overlap
         accumulated_offset += durations[i - 1] - flash_dur
 
-        out_label = f"xf{i}"
-        xfade = (
-            f"[{current}][{labels[i]}]"
+        v_out = f"xf_v{i}"
+        a_out = f"xf_a{i}"
+
+        # Video transition (fade to white)
+        parts.append(
+            f"[{current_v}][{v_labels[i]}]"
             f"xfade=transition=fadewhite"
             f":duration={flash_dur}"
-            f":offset={accumulated_offset:.4f}"          # ← THE FIX
-            f"[{out_label}]"
+            f":offset={accumulated_offset:.4f}"
+            f"[{v_out}]"
         )
-        parts.append(xfade)
-        current = out_label
 
-    return ";\n".join(parts), f"[{current}]"
+        # Audio transition (cross-fade matching video duration exactly)
+        parts.append(
+            f"[{current_a}][{a_labels[i]}]"
+            f"acrossfade=d={flash_dur}:c1=tri:c2=tri"
+            f"[{a_out}]"
+        )
+
+        current_v = v_out
+        current_a = a_out
+
+    return ";\n".join(parts), f"[{current_v}]", f"[{current_a}]"
 
 
 def concatenate_scenes(
     scene_paths: list[Path],
     output_path: Path,
     fps: int = 20,
+    flash_dur: float = 0.4,
 ) -> Path:
     """
-    Concatenate all scene videos with lightning flash transitions between them.
+    Concatenate all scene videos with lightning flash transitions.
 
-    • Single scene  → plain file copy (no re-encode).
-    • Multi-scene   → xfade filter chain with correct offsets.
-    • On filter failure → falls back to plain concat (no transitions).
+    • Single scene  → plain file copy (no re-encode, audio intact).
+    • Multi-scene   → xfade + acrossfade filter chain with correct offsets.
+    • On failure    → falls back to plain concat (audio preserved there too).
+
+    Scenes with no audio stream get a synthesised silent track so the
+    filter graph never errors with "no audio stream" mismatches.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -201,53 +276,68 @@ def concatenate_scenes(
         shutil.copy2(scene_paths[0], output_path)
         return output_path
 
-    # Probe every scene's real duration before building the filter
-    durations = []
-    for sp in scene_paths:
-        dur = _get_duration(sp)
-        durations.append(dur)
-        print(f"  Scene duration: {sp.name} = {dur:.2f}s")
+    # ── Probe every scene before building the filter ───────────────────────
+    durations   : list[float] = []
+    audio_flags : list[bool]  = []
 
-    expected_total = sum(durations) - (len(scene_paths) - 1) * 0.4
-    print(f"  Expected output duration: {expected_total:.2f}s "
-          f"({len(scene_paths)} scenes × ~{sum(durations)/len(scene_paths):.1f}s "
-          f"with {len(scene_paths)-1} × 0.4s flash)")
+    for sp in scene_paths:
+        dur  = _get_duration(sp)
+        has_a = _has_audio(sp)
+        durations.append(dur)
+        audio_flags.append(has_a)
+        print(f"  {sp.name}: {dur:.2f}s  audio={'yes' if has_a else 'NO — silence will be synthesised'}")
+
+    expected_total = sum(durations) - (len(scene_paths) - 1) * flash_dur
+    print(
+        f"  Expected output: {expected_total:.2f}s "
+        f"({len(scene_paths)} scenes, {len(scene_paths)-1} × {flash_dur}s flash)"
+    )
 
     input_args = []
     for sp in scene_paths:
         input_args += ["-i", str(sp)]
 
-    filter_complex, final_label = _lightning_filter(
-        len(scene_paths), durations, fps
+    filter_complex, final_v, final_a = _lightning_filter(
+        len(scene_paths),
+        durations,
+        audio_flags,
+        fps=fps,
+        flash_dur=flash_dur,
     )
 
     cmd = [
         "ffmpeg", "-y",
         *input_args,
         "-filter_complex", filter_complex,
-        "-map", final_label,
+        "-map", final_v,          # mapped video stream
+        "-map", final_a,          # mapped audio stream  ← was missing before
         "-c:v", "libx264", "-crf", "17", "-preset", "fast",
-        "-an",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
         str(output_path),
     ]
+
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
     if r.returncode != 0:
-        print(f"Lightning filter failed, falling back to plain concat:\n{r.stderr}")
+        print(f"  Lightning filter failed — falling back to plain concat.\n  {r.stderr[-400:]}")
         _plain_concat(scene_paths, output_path)
     else:
-        # Verify actual output duration
         try:
             actual = _get_duration(output_path)
-            print(f"  ✅ Final video duration: {actual:.2f}s")
+            print(f"  ✅ Final video duration: {actual:.2f}s  (expected ~{expected_total:.2f}s)")
         except Exception:
             pass
 
     return output_path
 
 
+# ── Emergency fallback ────────────────────────────────────────────────────────
+
 def _plain_concat(scene_paths: list[Path], output_path: Path) -> None:
-    """Emergency fallback — plain concat with no transitions."""
+    """
+    Plain concat fallback — no transitions, but audio is preserved.
+    Re-encodes both video and audio so mixed-format inputs are accepted.
+    """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         lf = Path(f.name)
         for sp in scene_paths:
@@ -258,7 +348,8 @@ def _plain_concat(scene_paths: list[Path], output_path: Path) -> None:
         "-f", "concat", "-safe", "0",
         "-i", str(lf),
         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-        "-an",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+        # NOTE: -an removed — audio is preserved
         str(output_path),
     ]
     r = subprocess.run(cmd, capture_output=True, text=True)
