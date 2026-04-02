@@ -1,17 +1,6 @@
-"""
-Groq-powered prompt enhancer.
-
-enhance_image_prompt(raw)  → one detailed txt2img prompt for the source frame
-enhance_prompt(raw)        → list of 5 sequential img2vid prompts for one scene
-
-Both use llama-3.3-70b-versatile via Groq's OpenAI-compatible endpoint.
-"""
-
 import json
 import httpx
 from config import settings
-
-# ── System prompts ────────────────────────────────────────────────────────────
 
 _IMAGE_SYSTEM = """\
 You are an expert image-generation prompt engineer specialising in cinematic \
@@ -49,9 +38,6 @@ Example:
 ["prompt1...", "prompt2...", "prompt3...", "prompt4...", "prompt5..."]
 """
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 def _groq_headers() -> dict:
     return {
         "Authorization": f"Bearer {settings.GROQ_API_KEY}",
@@ -80,7 +66,6 @@ async def _groq_chat(system: str, user: str, max_tokens: int = 1024) -> str:
 
 
 def _strip_fences(text: str) -> str:
-    """Remove ```json ... ``` or ``` ... ``` wrappers if Groq adds them."""
     if text.startswith("```"):
         lines = text.split("\n")
         # drop first line (```json or ```) and last line (```)
@@ -88,12 +73,7 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
-
 async def enhance_image_prompt(raw_prompt: str) -> str:
-    """
-    Returns one detailed txt2img prompt for the scene's source keyframe image.
-    """
     result = await _groq_chat(
         system=_IMAGE_SYSTEM,
         user=raw_prompt,
@@ -103,10 +83,6 @@ async def enhance_image_prompt(raw_prompt: str) -> str:
 
 
 async def enhance_prompt(raw_prompt: str) -> list[str]:
-    """
-    Returns a list of exactly 5 sequential img2vid prompts for one 20s scene.
-    Raises ValueError if Groq doesn't return a valid 5-element JSON array.
-    """
     raw = await _groq_chat(
         system=_VIDEO_SYSTEM,
         user=f"Scene description: {raw_prompt}",
