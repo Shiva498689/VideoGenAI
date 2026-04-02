@@ -1,39 +1,3 @@
-"""
-CineForge FastAPI Backend
-=========================
-
-Full pipeline per scene
-────────────────────────
- 1. POST /projects/{pid}/scenes
-      → Groq enhances raw prompt → 5 clip prompts + 1 image prompt
-      → Queues txt2img job (GPU_LOCK serialises with video jobs)
-      → Returns immediately; poll for status
-
- 2. GET  /projects/{pid}/scenes/{idx}
-      → Poll until status == "confirming"
-      → Response includes source_image_url for the UI to display
-
- 3. POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": true }
-      → Approved: starts 5-clip generation chain in background
-    POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": false }
-      → Rejected: regenerates source image (same prompt)
-    POST /projects/{pid}/scenes/{idx}/regenerate  { "prompt": "..." }
-      → Rejected with new description: re-enhances + regenerates
-
- 4. Background clip loop (for each of 5 clips):
-      upload seed image → img2vid → download clip
-      extract last frame → use as seed for next clip
-    → On completion: assemble 5 clips → 20s scene.mp4
-
- 5. POST /projects/{pid}/finalize
-      → Stitches all done scenes with lightning-flash transition → final.mp4
-
-FIXES APPLIED:
-  - extract_last_frame, assemble_scene, concatenate_scenes all use
-    subprocess.run() (blocking). Wrapped in asyncio.to_thread() so they
-    never freeze the FastAPI event loop during long video operations.
-"""
-
 import asyncio
 from pathlib import Path
 
@@ -51,7 +15,6 @@ from storage import StorageManager
 from video_processing import assemble_scene, concatenate_scenes
 from workflows import build_image_workflow, build_video_workflow
 
-# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="CineForge — AI Video Pipeline", version="3.1.0")
 
 app.add_middleware(
@@ -63,12 +26,10 @@ app.add_middleware(
 
 storage = StorageManager(settings.OUTPUT_DIR)
 
-# Static mounts
 app.mount("/files", StaticFiles(directory=str(settings.OUTPUT_DIR)), name="files")
 app.mount("/ui",    StaticFiles(directory="frontend", html=True),    name="ui")
 
 
-# ── Pydantic models ───────────────────────────────────────────────────────────
 class CreateProjectReq(BaseModel):
     title: str = "Untitled Project"
 
@@ -76,16 +37,13 @@ class SceneReq(BaseModel):
     prompt: str
 
 class ConfirmReq(BaseModel):
-    confirmed: bool   # True → proceed with clip gen, False → regen image
+    confirmed: bool   
 
-
-# ── Root ──────────────────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
     return {"status": "ok", "ui": "/ui", "docs": "/docs"}
 
 
-# ── Projects ──────────────────────────────────────────────────────────────────
 @app.post("/projects", status_code=201)
 async def create_project(req: CreateProjectReq):
     return storage.create_project(title=req.title)
@@ -105,20 +63,13 @@ async def get_project(pid: str):
 
 
 def _hydrate_project(p: dict) -> dict:
-    """Attach URL fields to all scenes inside a project dict."""
     p = dict(p)
     p["scenes"] = [_hydrate_scene(p["project_id"], s) for s in p.get("scenes", [])]
     return p
 
 
-# ── Scene: create ─────────────────────────────────────────────────────────────
 @app.post("/projects/{pid}/scenes", status_code=201)
 async def create_scene(pid: str, req: SceneReq, bg: BackgroundTasks):
-    """
-    Step 1 of the pipeline.
-    Enhances the raw prompt via Groq, then kicks off txt2img in the background.
-    Returns the scene stub immediately — poll GET /…/scenes/{idx} for updates.
-    """
     if not storage.get_project(pid):
         raise HTTPException(404, "Project not found")
 
@@ -138,7 +89,6 @@ async def create_scene(pid: str, req: SceneReq, bg: BackgroundTasks):
     return _hydrate_scene(pid, storage.get_scene(pid, scene_idx))
 
 
-# ── Scene: read ───────────────────────────────────────────────────────────────
 @app.get("/projects/{pid}/scenes/{scene_idx}")
 async def get_scene(pid: str, scene_idx: int):
     s = storage.get_scene(pid, scene_idx)
@@ -148,7 +98,6 @@ async def get_scene(pid: str, scene_idx: int):
 
 
 def _hydrate_scene(pid: str, s: dict) -> dict:
-    """Attach *_url fields so the frontend can render images/videos directly."""
     s = dict(s)
     if s.get("source_image"):
         s["source_image_url"] = storage.rel_url(s["source_image"])
@@ -158,7 +107,6 @@ def _hydrate_scene(pid: str, s: dict) -> dict:
     return s
 
 
-# ── Scene: confirm / reject source image ─────────────────────────────────────
 @app.post("/projects/{pid}/scenes/{scene_idx}/confirm")
 async def confirm_image(pid: str, scene_idx: int, req: ConfirmReq, bg: BackgroundTasks):
     scene = storage.get_scene(pid, scene_idx)
@@ -178,7 +126,6 @@ async def confirm_image(pid: str, scene_idx: int, req: ConfirmReq, bg: Backgroun
     return {"status": "generating_clips", "message": "Generating 5 clips…"}
 
 
-# ── Scene: regenerate with new prompt ─────────────────────────────────────────
 @app.post("/projects/{pid}/scenes/{scene_idx}/regenerate")
 async def regenerate_image(pid: str, scene_idx: int, req: SceneReq, bg: BackgroundTasks):
     scene = storage.get_scene(pid, scene_idx)
@@ -199,7 +146,6 @@ async def regenerate_image(pid: str, scene_idx: int, req: SceneReq, bg: Backgrou
     return {"status": "generating_image"}
 
 
-# ── Finalize ──────────────────────────────────────────────────────────────────
 @app.post("/projects/{pid}/finalize")
 async def finalize_project(pid: str, bg: BackgroundTasks):
     project = storage.get_project(pid)
@@ -230,13 +176,7 @@ async def download_final(pid: str):
     )
 
 
-# ── Background tasks ──────────────────────────────────────────────────────────
-
 async def _gen_source_image(pid: str, scene_idx: int, image_prompt: str):
-    """
-    Runs the txt2img workflow on ComfyUI.
-    On success → status becomes 'confirming' so the UI can show the image.
-    """
     try:
         workflow  = build_image_workflow(image_prompt)
         dest_path = storage.source_image_path(pid, scene_idx)
@@ -249,19 +189,6 @@ async def _gen_source_image(pid: str, scene_idx: int, image_prompt: str):
 
 
 async def _gen_clips(pid: str, scene_idx: int):
-    """
-    Generates 5 sequential 4-second clips for one scene.
-
-    Clip chain:
-      clip_0 ← source_image         + enhanced_prompts[0]
-      clip_1 ← last_frame(clip_0)   + enhanced_prompts[1]
-      clip_2 ← last_frame(clip_1)   + enhanced_prompts[2]
-      clip_3 ← last_frame(clip_2)   + enhanced_prompts[3]
-      clip_4 ← last_frame(clip_3)   + enhanced_prompts[4]
-
-    FIX: extract_last_frame and assemble_scene use subprocess.run (blocking).
-    Both are wrapped in asyncio.to_thread() to avoid freezing the event loop.
-    """
     try:
         scene      = storage.get_scene(pid, scene_idx)
         prompts    = scene["enhanced_prompts"]
@@ -281,13 +208,11 @@ async def _gen_clips(pid: str, scene_idx: int):
             storage.add_clip(pid, scene_idx, str(clip_path))
             storage.update_scene(pid, scene_idx, last_completed_clip=i)
 
-            # Prepare seed for next clip — blocking ffmpeg off the event loop
             if i < settings.CLIPS_PER_SCENE - 1:
                 last_frame = storage.last_frame_path(pid, scene_idx)
                 await asyncio.to_thread(extract_last_frame, clip_path, last_frame)
                 seed_image = last_frame
 
-        # Assemble 5 clips → 20s scene.mp4 — blocking ffmpeg off the event loop
         clip_paths  = [storage.clip_path(pid, scene_idx, i)
                        for i in range(settings.CLIPS_PER_SCENE)]
         scene_video = storage.scene_video_path(pid, scene_idx)
@@ -301,12 +226,6 @@ async def _gen_clips(pid: str, scene_idx: int):
 
 
 async def _finalize(pid: str, done_scenes: list):
-    """
-    Concatenates all done scene videos with lightning-flash transitions.
-
-    FIX: concatenate_scenes uses subprocess.run (blocking).
-    Wrapped in asyncio.to_thread() to avoid freezing the event loop.
-    """
     try:
         scene_paths = [Path(s["scene_video"]) for s in done_scenes]
         out_path    = storage.final_video_path(pid)
