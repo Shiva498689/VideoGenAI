@@ -7,7 +7,6 @@ from pathlib import Path
 
 from config import settings
 
-# One lock for the entire process — only one GPU job at a time
 GPU_LOCK = asyncio.Lock()
 
 
@@ -134,6 +133,4 @@ class ComfyUIClient:
             out_fname = await self.wait_for_output(prompt_id, timeout=timeout)
             return await self.download_output(out_fname, dest_path)
 
-
-# ── Singleton — imported everywhere ──────────────────────────────────────────
 comfy = ComfyUIClient(settings.COMFY_URL)
