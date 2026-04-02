@@ -1,33 +1,10 @@
-"""
-StorageManager — filesystem layout + JSON index
-
-outputs/
-├── index.json                          ← master metadata store
-└── projects/
-    └── {project_id}/
-        ├── scenes/
-        │   └── {scene_idx}/
-        │       ├── source_image.png    ← txt2img keyframe (confirmed by user)
-        │       ├── last_frame.png      ← last frame of previous clip (seed)
-        │       ├── clips/
-        │       │   ├── clip_0.mp4
-        │       │   ├── clip_1.mp4
-        │       │   ├── clip_2.mp4
-        │       │   ├── clip_3.mp4
-        │       │   └── clip_4.mp4
-        │       └── scene.mp4           ← 5 clips assembled → 20s
-        └── final.mp4                   ← all scenes with lightning transitions
-"""
-
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
 
 class StorageManager:
     def __init__(self, output_dir: Path):
@@ -42,8 +19,6 @@ class StorageManager:
             self._idx = {"projects": {}}
             self._flush()
 
-    # ── Projects ──────────────────────────────────────────────────────────────
-
     def create_project(self, title: str = "Untitled") -> dict:
         pid     = str(uuid4())
         project = {
@@ -52,7 +27,7 @@ class StorageManager:
             "created_at":   _now(),
             "scenes":       [],
             "final_video":  None,
-            "final_status": "idle",     # idle | processing | done | error
+            "final_status": "idle",    
         }
         self._idx["projects"][pid] = project
         self.project_dir(pid).mkdir(parents=True, exist_ok=True)
@@ -73,7 +48,6 @@ class StorageManager:
         self._idx["projects"][pid].update(kwargs)
         self._flush()
 
-    # ── Scenes ────────────────────────────────────────────────────────────────
 
     def add_scene(
         self,
@@ -86,14 +60,13 @@ class StorageManager:
         scene = {
             "scene_idx":             scene_idx,
             "raw_prompt":            raw_prompt,
-            "enhanced_prompts":      enhanced_prompts,  # 5 clip prompts
-            "enhanced_image_prompt": None,               # set separately
+            "enhanced_prompts":      enhanced_prompts,
+            "enhanced_image_prompt": None,
             "source_image":          None,
             "clips":                 [],
             "last_completed_clip":   -1,
             "scene_video":           None,
             "status": "pending",
-            # pending → generating_image → confirming → generating_clips → done | error
             "error":      None,
             "created_at": _now(),
         }
@@ -117,7 +90,6 @@ class StorageManager:
         self._idx["projects"][pid]["scenes"][scene_idx]["clips"].append(clip_path)
         self._flush()
 
-    # ── Paths ─────────────────────────────────────────────────────────────────
 
     def project_dir(self, pid: str) -> Path:
         return self.root / "projects" / pid
@@ -140,7 +112,6 @@ class StorageManager:
     def final_video_path(self, pid: str) -> Path:
         return self.project_dir(pid) / "final.mp4"
 
-    # ── URL helpers (relative to OUTPUT_DIR, for /files/ mount) ──────────────
 
     def rel_url(self, abs_path: str | Path) -> str:
         try:
@@ -148,8 +119,6 @@ class StorageManager:
             return f"/files/{rel}"
         except ValueError:
             return ""
-
-    # ── Internal ──────────────────────────────────────────────────────────────
 
     def _flush(self):
         with open(self.index_path, "w") as f:
