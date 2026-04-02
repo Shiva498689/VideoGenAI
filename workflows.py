@@ -1,56 +1,23 @@
-"""
-Workflow JSON builders.
-
-Both workflows run on the SAME ComfyUI instance (single GPU).
-GPU_LOCK in comfy_client.py ensures they never run concurrently.
-
-image_workflow_template.json  → txt2img  (SDXL Lightning / KSampler)
-video_workflow_template.json  → img2vid  (LTX-Video 2.3)
-
-Templates are loaded fresh on each call (no caching) so you can hot-swap
-the JSON files without restarting the server.
-
-FIX: Paths are now resolved relative to this file's own location using
-Path(__file__).parent — the app works regardless of which directory
-uvicorn / Modal launches from.
-"""
-
 import copy
 import json
 from pathlib import Path
 
 from config import settings
 
-# Resolve template directory relative to this file, not CWD
 _BASE = Path(__file__).parent
-
 
 def _load(filename: str) -> dict:
     path = _BASE / filename
     with open(path, "r") as f:
         return json.load(f)
 
-
 def build_image_workflow(prompt: str) -> dict:
-    """
-    Loads image_workflow_template.json and injects the enhanced image prompt
-    into node IMG_PROMPT_NODE_ID (CLIPTextEncode / Positive prompt).
-    """
     wf = _load("image_workflow_template.json")
     wf = copy.deepcopy(wf)
     wf[settings.IMG_PROMPT_NODE_ID]["inputs"]["text"] = prompt
     return wf
 
-
 def build_video_workflow(prompt: str) -> dict:
-    """
-    Loads video_workflow_template.json and injects the clip prompt.
-
-    NOTE: The seed image is NOT injected here.
-    comfy_client.run_job() uploads the image and injects the filename into
-    VID_IMAGE_NODE_ID atomically while holding GPU_LOCK, ensuring no race
-    between upload and workflow dispatch.
-    """
     wf = _load("video_workflow_template.json")
     wf = copy.deepcopy(wf)
     wf[settings.VID_PROMPT_NODE_ID]["inputs"]["text"] = prompt
