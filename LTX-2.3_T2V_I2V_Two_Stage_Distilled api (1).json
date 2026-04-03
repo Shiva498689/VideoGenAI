@@ -43,7 +43,7 @@
   },
   "2612": {
     "inputs": {
-      "text": "pc game, console game, video game, cartoon, childish, ugly",
+      "text": "pc game, console game, video game, cartoon, childish, ugly, static, hiss, white noise, background noise, distorted audio, low quality audio, muffled, hum",
       "clip": [
         "4982",
         0
@@ -527,7 +527,7 @@
   },
   "4988": {
     "inputs": {
-      "value": 97
+      "value": 305
     },
     "class_type": "PrimitiveInt",
     "_meta": {
