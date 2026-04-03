@@ -8,17 +8,16 @@ outputs/
         ├── scenes/
         │   └── {scene_idx}/
         │       ├── source_image.png    ← txt2img keyframe (confirmed by user)
-        │       ├── last_frame.png      ← last frame of previous clip (seed for clip 0)
+        │       ├── last_frame.png      ← last frame of previous clip (seed)
         │       ├── clips/
         │       │   ├── clip_0.mp4
-        │       │   ├── clip_0_last_frame.png   ← last frame of clip_0 (seed for clip_1)
         │       │   ├── clip_1.mp4
-        │       │   ├── clip_1_last_frame.png
         │       │   ├── clip_2.mp4
-        │       │   ├── clip_2_last_frame.png
         │       │   ├── clip_3.mp4
-        │       │   ├── clip_3_last_frame.png
         │       │   └── clip_4.mp4
+        │       ├── transitions/        ← NEW: stores transitioned clips
+        │       │   ├── transition_0_1.mp4
+        │       │   └── ...
         │       └── scene.mp4           ← 5 clips assembled → 20s
         └── final.mp4                   ← all scenes with lightning transitions
 """
@@ -27,6 +26,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from typing import Optional, List
 
 
 def _now() -> str:
@@ -57,6 +57,11 @@ class StorageManager:
             "scenes":       [],
             "final_video":  None,
             "final_status": "idle",     # idle | processing | done | error
+            "settings": {
+                "fps": 20,
+                "transition_duration": 0.4,
+                "default_quality": "high"
+            }
         }
         self._idx["projects"][pid] = project
         self.project_dir(pid).mkdir(parents=True, exist_ok=True)
@@ -94,21 +99,23 @@ class StorageManager:
             "enhanced_image_prompt": None,               # set separately
             "source_image":          None,
             "clips":                 [],
-            # Per-clip metadata: index → {status, prompt_override, error}
-            # status: pending | generating | done | error
-            "clip_meta":             {},
+            "transitions":           [],                 # NEW: store transition info
             "last_completed_clip":   -1,
             "scene_video":           None,
             "status": "pending",
-            # pending → generating_image → confirming → generating_clips → done | error
-            # NOTE: status stays "done" even when a clip is being regenerated;
-            # check clip_meta[clip_idx]["status"] for per-clip progress.
+            # pending → generating_image → confirming → generating_clips → editing → done | error
             "error":      None,
             "created_at": _now(),
+            "timeline": {                               # NEW: timeline state
+                "order": [],                            # clip order indices
+                "trims": {},                            # trim start/end per clip
+                "transitions": []                       # transitions between clips
+            }
         }
         project["scenes"].append(scene)
         self.scene_dir(pid, scene_idx).mkdir(parents=True, exist_ok=True)
         (self.scene_dir(pid, scene_idx) / "clips").mkdir(exist_ok=True)
+        (self.scene_dir(pid, scene_idx) / "transitions").mkdir(exist_ok=True)  # NEW
         self._flush()
         return scene
 
@@ -123,40 +130,39 @@ class StorageManager:
         self._flush()
 
     def add_clip(self, pid: str, scene_idx: int, clip_path: str):
-        clips = self._idx["projects"][pid]["scenes"][scene_idx]["clips"]
-        clip_idx = len(clips)
-        # Append or replace at index
-        if clip_idx < len(clips):
-            clips[clip_idx] = clip_path
-        else:
-            clips.append(clip_path)
-        self._flush()
-
-    def set_clip(self, pid: str, scene_idx: int, clip_idx: int, clip_path: str):
-        """Set (or replace) a specific clip by index."""
-        clips = self._idx["projects"][pid]["scenes"][scene_idx]["clips"]
-        # Extend list if needed
-        while len(clips) <= clip_idx:
-            clips.append(None)
-        clips[clip_idx] = clip_path
-        self._flush()
-
-    def update_clip_meta(self, pid: str, scene_idx: int, clip_idx: int, **kwargs):
-        """Update per-clip metadata dictionary."""
         scene = self._idx["projects"][pid]["scenes"][scene_idx]
-        if "clip_meta" not in scene:
-            scene["clip_meta"] = {}
-        key = str(clip_idx)
-        if key not in scene["clip_meta"]:
-            scene["clip_meta"][key] = {}
-        scene["clip_meta"][key].update(kwargs)
+        scene["clips"].append(clip_path)
+        # Update timeline order
+        if "timeline" not in scene:
+            scene["timeline"] = {"order": [], "trims": {}, "transitions": []}
+        scene["timeline"]["order"] = list(range(len(scene["clips"])))
         self._flush()
 
-    def get_clip_meta(self, pid: str, scene_idx: int, clip_idx: int) -> dict:
-        scene = self.get_scene(pid, scene_idx)
-        if not scene:
-            return {}
-        return scene.get("clip_meta", {}).get(str(clip_idx), {})
+    def update_timeline_order(self, pid: str, scene_idx: int, new_order: List[int]):
+        scene = self._idx["projects"][pid]["scenes"][scene_idx]
+        if "timeline" not in scene:
+            scene["timeline"] = {"order": [], "trims": {}, "transitions": []}
+        scene["timeline"]["order"] = new_order
+        self._flush()
+
+    def update_clip_trim(self, pid: str, scene_idx: int, clip_idx: int, start: float, end: float):
+        scene = self._idx["projects"][pid]["scenes"][scene_idx]
+        if "timeline" not in scene:
+            scene["timeline"] = {"order": [], "trims": {}, "transitions": []}
+        scene["timeline"]["trims"][str(clip_idx)] = {"start": start, "end": end}
+        self._flush()
+
+    def add_transition_info(self, pid: str, scene_idx: int, clip_a: int, clip_b: int, trans_type: str, duration: float):
+        scene = self._idx["projects"][pid]["scenes"][scene_idx]
+        if "timeline" not in scene:
+            scene["timeline"] = {"order": [], "trims": {}, "transitions": []}
+        scene["timeline"]["transitions"].append({
+            "clip_a": clip_a,
+            "clip_b": clip_b,
+            "type": trans_type,
+            "duration": duration
+        })
+        self._flush()
 
     # ── Paths ─────────────────────────────────────────────────────────────────
 
@@ -170,24 +176,13 @@ class StorageManager:
         return self.scene_dir(pid, scene_idx) / "source_image.png"
 
     def last_frame_path(self, pid: str, scene_idx: int) -> Path:
-        """Legacy: last frame of source image used as seed for clip_0."""
         return self.scene_dir(pid, scene_idx) / "last_frame.png"
-
-    def clip_last_frame_path(self, pid: str, scene_idx: int, clip_idx: int) -> Path:
-        """
-        Stores the last frame of clip_{clip_idx}.png.
-        This is the seed image for clip_{clip_idx + 1}.
-        Kept separate per clip so that when clip_N is regenerated,
-        we can re-extract its last frame and re-chain only the downstream clips.
-        """
-        return (
-            self.scene_dir(pid, scene_idx)
-            / "clips"
-            / f"clip_{clip_idx}_last_frame.png"
-        )
 
     def clip_path(self, pid: str, scene_idx: int, clip_idx: int) -> Path:
         return self.scene_dir(pid, scene_idx) / "clips" / f"clip_{clip_idx}.mp4"
+
+    def transition_path(self, pid: str, scene_idx: int, clip_a: int, clip_b: int) -> Path:
+        return self.scene_dir(pid, scene_idx) / "transitions" / f"transition_{clip_a}_{clip_b}.mp4"
 
     def scene_video_path(self, pid: str, scene_idx: int) -> Path:
         return self.scene_dir(pid, scene_idx) / "scene.mp4"
