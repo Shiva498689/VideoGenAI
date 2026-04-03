@@ -1,6 +1,17 @@
+"""
+Groq-powered prompt enhancer.
+
+enhance_image_prompt(raw)  → one detailed txt2img prompt for the source frame
+enhance_prompt(raw)        → list of 5 sequential img2vid prompts for one scene
+
+Both use llama-3.3-70b-versatile via Groq's OpenAI-compatible endpoint.
+"""
+
 import json
 import httpx
 from config import settings
+
+# ── System prompts ────────────────────────────────────────────────────────────
 
 _IMAGE_SYSTEM = """\
 You are an expert image-generation prompt engineer specialising in cinematic \
@@ -22,8 +33,8 @@ _VIDEO_SYSTEM = """\
 You are a cinematic AI video director and prompt engineer.
 Your job is to take a user's rough scene description and expand it into \
 exactly 5 detailed, SEQUENTIAL video prompts for an img2vid model \
-(LTX-Video 2.3). Each prompt drives a 4-second clip; together they form a \
-smooth 20-second scene.
+(LTX-Video 2.3). Each prompt drives a 20-second clip; together they form a \
+smooth 100-second scene.
 
 Rules:
 - Clip 1 starts from the generated keyframe image — describe its continuation.
@@ -37,6 +48,9 @@ Rules:
 Example:
 ["prompt1...", "prompt2...", "prompt3...", "prompt4...", "prompt5..."]
 """
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _groq_headers() -> dict:
     return {
@@ -66,6 +80,7 @@ async def _groq_chat(system: str, user: str, max_tokens: int = 1024) -> str:
 
 
 def _strip_fences(text: str) -> str:
+    """Remove ```json ... ``` or ``` ... ``` wrappers if Groq adds them."""
     if text.startswith("```"):
         lines = text.split("\n")
         # drop first line (```json or ```) and last line (```)
@@ -73,7 +88,12 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
+# ── Public API ────────────────────────────────────────────────────────────────
+
 async def enhance_image_prompt(raw_prompt: str) -> str:
+    """
+    Returns one detailed txt2img prompt for the scene's source keyframe image.
+    """
     result = await _groq_chat(
         system=_IMAGE_SYSTEM,
         user=raw_prompt,
@@ -83,6 +103,10 @@ async def enhance_image_prompt(raw_prompt: str) -> str:
 
 
 async def enhance_prompt(raw_prompt: str) -> list[str]:
+    """
+    Returns a list of exactly 5 sequential img2vid prompts for one 20s scene.
+    Raises ValueError if Groq doesn't return a valid 5-element JSON array.
+    """
     raw = await _groq_chat(
         system=_VIDEO_SYSTEM,
         user=f"Scene description: {raw_prompt}",
