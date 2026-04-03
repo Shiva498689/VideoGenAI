@@ -22,48 +22,30 @@ Full pipeline per scene
 
  4. Background clip loop (for each of 5 clips):
       upload seed image → img2vid → download clip
-      extract last frame → save as clip_{i}_last_frame.png (per-clip seed)
-      use that last frame as seed for next clip
+      extract last frame → use as seed for next clip
     → On completion: assemble 5 clips → 20s scene.mp4
 
  5. POST /projects/{pid}/finalize
       → Stitches all done scenes with lightning-flash transition → final.mp4
 
- 6. POST /projects/{pid}/scenes/{idx}/clips/{clip_idx}/regenerate
-      { "prompt": "optional new prompt override" }   ← prompt is optional
-      → Regenerates ONE clip after scene is fully done
-      → Re-extracts last-frame from the new clip
-      → Re-generates all downstream clips (clip_{clip_idx+1} … clip_4)
-        using their existing (or overridden) prompts + the new seed chain
-      → Re-assembles scene.mp4
-      → scene status temporarily becomes "regenerating_clip" during this,
-        then returns to "done" when finished
+NEW EDITING FEATURES:
+ 6. POST /projects/{pid}/scenes/{scene_idx}/upload
+      → Upload existing video to use as clip
 
- 7. GET /projects/{pid}/scenes/{idx}/clips/{clip_idx}
-      → Returns clip status, URL, and current prompt
+ 7. POST /projects/{pid}/scenes/{scene_idx}/edit
+      → Edit timeline: trim, cut, reorder clips
 
-CLIP REGENERATION DETAILS:
-  - Only allowed when scene status is "done" OR "error" (post-generation).
-  - The per-clip last frame is stored as clips/clip_{i}_last_frame.png so
-    re-chaining downstream clips always has the correct seed image.
-  - If a new prompt is supplied it overrides that clip's enhanced_prompts[i]
-    for this regeneration AND is persisted in enhanced_prompts so future
-    downstream regenerations pick it up.
-  - Clip regeneration is serialised via GPU_LOCK just like normal generation.
-
-FIXES APPLIED:
-  - extract_last_frame, assemble_scene, concatenate_scenes all use
-    subprocess.run() (blocking). Wrapped in asyncio.to_thread() so they
-    never freeze the FastAPI event loop during long video operations.
-  - Per-clip last frames stored at clip_{i}_last_frame.png instead of a
-    single last_frame.png, enabling correct re-seeding for downstream clips.
+ 8. POST /projects/{pid}/scenes/{scene_idx}/transitions
+      → Add transitions between clips
 """
 
 import asyncio
+import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
+import tempfile
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -74,11 +56,11 @@ from config import settings
 from frame_extractor import extract_last_frame
 from prompt_enhancer import enhance_image_prompt, enhance_prompt
 from storage import StorageManager
-from video_processing import assemble_scene, concatenate_scenes
+from video_processing import assemble_scene, concatenate_scenes, edit_video, add_transition
 from workflows import build_image_workflow, build_video_workflow
 
 # ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(title="CineForge — AI Video Pipeline", version="4.0.0")
+app = FastAPI(title="CineForge — AI Video Editor & Generator", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,14 +86,30 @@ class SceneReq(BaseModel):
 class ConfirmReq(BaseModel):
     confirmed: bool   # True → proceed with clip gen, False → regen image
 
-class ClipRegenerateReq(BaseModel):
-    prompt: Optional[str] = None  # If omitted, reuses the existing enhanced prompt
+class EditClipReq(BaseModel):
+    clip_index: int
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    action: str  # "trim", "cut", "split"
+    split_position: Optional[float] = None
+
+class ReorderClipsReq(BaseModel):
+    new_order: List[int]
+
+class AddTransitionReq(BaseModel):
+    clip_index_a: int
+    clip_index_b: int
+    transition_type: str = "fade"  # fade, crossfade, wipe, slide
+    duration: float = 0.5
+
+class ExportSceneReq(BaseModel):
+    quality: str = "high"  # high, medium, low
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {"status": "ok", "ui": "/ui", "docs": "/docs"}
+    return {"status": "ok", "ui": "/ui", "docs": "/docs", "version": "4.0.0"}
 
 
 # ── Projects ──────────────────────────────────────────────────────────────────
@@ -140,7 +138,7 @@ def _hydrate_project(p: dict) -> dict:
     return p
 
 
-# ── Scene: create ─────────────────────────────────────────────────────────────
+# ── Scene: create (AI Generation) ─────────────────────────────────────────────
 @app.post("/projects/{pid}/scenes", status_code=201)
 async def create_scene(pid: str, req: SceneReq, bg: BackgroundTasks):
     """
@@ -167,6 +165,96 @@ async def create_scene(pid: str, req: SceneReq, bg: BackgroundTasks):
     return _hydrate_scene(pid, storage.get_scene(pid, scene_idx))
 
 
+# ── Scene: upload existing video (New Editing Feature) ────────────────────────
+@app.post("/projects/{pid}/scenes/{scene_idx}/upload")
+async def upload_video_to_scene(
+    pid: str, 
+    scene_idx: int, 
+    video: UploadFile = File(...),
+    position: int = Form(-1)  # -1 = append, else insert at position
+):
+    """
+    Upload an existing video to use as a clip in this scene.
+    """
+    scene = storage.get_scene(pid, scene_idx)
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+    
+    # Save uploaded video
+    clip_path = storage.clip_path(pid, scene_idx, len(scene.get("clips", [])))
+    with open(clip_path, "wb") as f:
+        shutil.copyfileobj(video.file, f)
+    
+    storage.add_clip(pid, scene_idx, str(clip_path))
+    
+    # Update scene status if needed
+    if scene["status"] == "pending":
+        storage.update_scene(pid, scene_idx, status="editing")
+    
+    return {"status": "uploaded", "clip_index": len(scene.get("clips", [])) - 1}
+
+
+# ── Scene: edit timeline (New Editing Feature) ────────────────────────────────
+@app.post("/projects/{pid}/scenes/{scene_idx}/edit")
+async def edit_scene_timeline(pid: str, scene_idx: int, req: EditClipReq, bg: BackgroundTasks):
+    """
+    Edit a clip in the timeline: trim, cut, split.
+    """
+    scene = storage.get_scene(pid, scene_idx)
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+    
+    clip_path = storage.clip_path(pid, scene_idx, req.clip_index)
+    if not clip_path.exists():
+        raise HTTPException(404, "Clip not found")
+    
+    # Perform editing in background to avoid blocking
+    bg.add_task(_edit_clip, pid, scene_idx, req, clip_path)
+    
+    return {"status": "editing", "action": req.action}
+
+
+@app.post("/projects/{pid}/scenes/{scene_idx}/reorder")
+async def reorder_clips(pid: str, scene_idx: int, req: ReorderClipsReq):
+    """
+    Reorder clips in the timeline.
+    """
+    scene = storage.get_scene(pid, scene_idx)
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+    
+    clips = scene.get("clips", [])
+    if len(clips) != len(req.new_order):
+        raise HTTPException(400, "New order length must match number of clips")
+    
+    reordered = [clips[i] for i in req.new_order]
+    storage.update_scene(pid, scene_idx, clips=reordered)
+    
+    return {"status": "reordered", "new_order": req.new_order}
+
+
+@app.post("/projects/{pid}/scenes/{scene_idx}/transitions")
+async def add_clip_transition(pid: str, scene_idx: int, req: AddTransitionReq, bg: BackgroundTasks):
+    """
+    Add a transition between two clips.
+    """
+    scene = storage.get_scene(pid, scene_idx)
+    if not scene:
+        raise HTTPException(404, "Scene not found")
+    
+    clip_a = storage.clip_path(pid, scene_idx, req.clip_index_a)
+    clip_b = storage.clip_path(pid, scene_idx, req.clip_index_b)
+    
+    if not clip_a.exists() or not clip_b.exists():
+        raise HTTPException(404, "One or both clips not found")
+    
+    # Create transitioned clip
+    output_path = storage.transition_path(pid, scene_idx, req.clip_index_a, req.clip_index_b)
+    bg.add_task(_add_transition, clip_a, clip_b, output_path, req.transition_type, req.duration)
+    
+    return {"status": "adding_transition", "output": str(output_path)}
+
+
 # ── Scene: read ───────────────────────────────────────────────────────────────
 @app.get("/projects/{pid}/scenes/{scene_idx}")
 async def get_scene(pid: str, scene_idx: int):
@@ -181,11 +269,9 @@ def _hydrate_scene(pid: str, s: dict) -> dict:
     s = dict(s)
     if s.get("source_image"):
         s["source_image_url"] = storage.rel_url(s["source_image"])
-    s["clip_urls"] = [storage.rel_url(c) for c in s.get("clips", []) if c]
+    s["clip_urls"] = [storage.rel_url(c) for c in s.get("clips", [])]
     if s.get("scene_video"):
         s["scene_video_url"] = storage.rel_url(s["scene_video"])
-    # Expose per-clip prompts for frontend display
-    s["clip_prompts"] = s.get("enhanced_prompts", [])
     return s
 
 
@@ -230,106 +316,31 @@ async def regenerate_image(pid: str, scene_idx: int, req: SceneReq, bg: Backgrou
     return {"status": "generating_image"}
 
 
-# ── Clip: read ────────────────────────────────────────────────────────────────
-@app.get("/projects/{pid}/scenes/{scene_idx}/clips/{clip_idx}")
-async def get_clip(pid: str, scene_idx: int, clip_idx: int):
-    """
-    Returns the current status and URL of a specific clip.
-    Also exposes the prompt that was used (or will be used) for this clip.
-    """
-    scene = storage.get_scene(pid, scene_idx)
-    if not scene:
-        raise HTTPException(404, "Scene not found")
-    if clip_idx < 0 or clip_idx >= settings.CLIPS_PER_SCENE:
-        raise HTTPException(400, f"clip_idx must be 0–{settings.CLIPS_PER_SCENE - 1}")
-
-    clip_path = storage.clip_path(pid, scene_idx, clip_idx)
-    clip_meta = storage.get_clip_meta(pid, scene_idx, clip_idx)
-    prompts   = scene.get("enhanced_prompts", [])
-
-    return {
-        "clip_idx":  clip_idx,
-        "scene_idx": scene_idx,
-        "project_id": pid,
-        "status":    clip_meta.get("status", "unknown"),
-        "error":     clip_meta.get("error"),
-        "prompt":    prompts[clip_idx] if clip_idx < len(prompts) else None,
-        "clip_url":  storage.rel_url(clip_path) if clip_path.exists() else None,
-    }
-
-
-# ── Clip: regenerate (post-scene-completion) ──────────────────────────────────
-@app.post("/projects/{pid}/scenes/{scene_idx}/clips/{clip_idx}/regenerate")
-async def regenerate_clip(
-    pid: str,
-    scene_idx: int,
-    clip_idx: int,
-    req: ClipRegenerateReq,
-    bg: BackgroundTasks,
+# ── Scene: export (New Feature) ───────────────────────────────────────────────
+@app.post("/projects/{pid}/scenes/{scene_idx}/export")
+async def export_scene(
+    pid: str, 
+    scene_idx: int, 
+    req: ExportSceneReq,
+    bg: BackgroundTasks
 ):
     """
-    Regenerates a single clip AFTER the scene has been fully generated.
-
-    Allowed when scene status is "done" or "error".
-    If req.prompt is supplied it overrides enhanced_prompts[clip_idx] and
-    is persisted so downstream clips re-chain correctly.
-
-    What happens in the background:
-      1. Regenerate clip_{clip_idx} using:
-           - seed = clip_{clip_idx - 1}_last_frame.png  (or source_image for clip 0)
-           - prompt = req.prompt (if given) else enhanced_prompts[clip_idx]
-      2. Extract last frame of new clip_{clip_idx} → clip_{clip_idx}_last_frame.png
-      3. Re-generate clip_{clip_idx+1} … clip_4 in sequence (re-chain), each
-         seeded by the previous clip's new last frame, using their current prompts.
-      4. Re-assemble scene.mp4 from all 5 clips.
-      5. scene status returns to "done".
+    Export the edited scene with specified quality.
     """
     scene = storage.get_scene(pid, scene_idx)
     if not scene:
         raise HTTPException(404, "Scene not found")
-
-    if scene["status"] not in ("done", "error"):
-        raise HTTPException(
-            400,
-            f"Clip regeneration is only allowed when scene status is 'done' or 'error'. "
-            f"Current status: '{scene['status']}'",
-        )
-
-    if clip_idx < 0 or clip_idx >= settings.CLIPS_PER_SCENE:
-        raise HTTPException(400, f"clip_idx must be 0–{settings.CLIPS_PER_SCENE - 1}")
-
-    # If a new prompt was supplied, persist it immediately
-    if req.prompt:
-        try:
-            # Optionally enhance the raw override prompt through Groq for quality
-            # (We send it through the video enhancer for a single clip prompt)
-            enhanced_override = await _enhance_single_clip_prompt(req.prompt)
-        except Exception:
-            # Fallback: use the raw prompt as-is if enhancement fails
-            enhanced_override = req.prompt
-
-        prompts = list(scene.get("enhanced_prompts", []))
-        if clip_idx < len(prompts):
-            prompts[clip_idx] = enhanced_override
-        else:
-            while len(prompts) <= clip_idx:
-                prompts.append(enhanced_override)
-        storage.update_scene(pid, scene_idx, enhanced_prompts=prompts, error=None)
-
-    # Mark scene as regenerating so frontend knows something is happening
-    storage.update_scene(pid, scene_idx, status="regenerating_clip", error=None)
-    storage.update_clip_meta(pid, scene_idx, clip_idx, status="generating", error=None)
-
-    bg.add_task(_regen_clip_chain, pid, scene_idx, clip_idx)
-    return {
-        "status": "regenerating_clip",
-        "clip_idx": clip_idx,
-        "message": (
-            f"Regenerating clip {clip_idx} and re-chaining "
-            f"clips {clip_idx}–{settings.CLIPS_PER_SCENE - 1}, "
-            f"then reassembling scene."
-        ),
-    }
+    
+    clips = scene.get("clips", [])
+    if not clips:
+        raise HTTPException(400, "No clips to export")
+    
+    clip_paths = [Path(c) for c in clips]
+    output_path = storage.scene_video_path(pid, scene_idx)
+    
+    bg.add_task(_export_scene, clip_paths, output_path, req.quality)
+    
+    return {"status": "exporting", "output_url": storage.rel_url(output_path)}
 
 
 # ── Finalize ──────────────────────────────────────────────────────────────────
@@ -386,14 +397,11 @@ async def _gen_clips(pid: str, scene_idx: int):
     Generates 5 sequential 4-second clips for one scene.
 
     Clip chain:
-      clip_0 ← source_image                    + enhanced_prompts[0]
-      clip_1 ← clip_0_last_frame.png            + enhanced_prompts[1]
-      clip_2 ← clip_1_last_frame.png            + enhanced_prompts[2]
-      clip_3 ← clip_2_last_frame.png            + enhanced_prompts[3]
-      clip_4 ← clip_3_last_frame.png            + enhanced_prompts[4]
-
-    Each clip's last frame is stored separately as clip_{i}_last_frame.png
-    so that a later regeneration of clip_N can correctly re-seed clip_N+1.
+      clip_0 ← source_image         + enhanced_prompts[0]
+      clip_1 ← last_frame(clip_0)   + enhanced_prompts[1]
+      clip_2 ← last_frame(clip_1)   + enhanced_prompts[2]
+      clip_3 ← last_frame(clip_2)   + enhanced_prompts[3]
+      clip_4 ← last_frame(clip_3)   + enhanced_prompts[4]
 
     FIX: extract_last_frame and assemble_scene use subprocess.run (blocking).
     Both are wrapped in asyncio.to_thread() to avoid freezing the event loop.
@@ -403,11 +411,7 @@ async def _gen_clips(pid: str, scene_idx: int):
         prompts    = scene["enhanced_prompts"]
         seed_image = Path(scene["source_image"])
 
-        # Initialise clip list to the right length
-        storage.update_scene(pid, scene_idx, clips=[None] * settings.CLIPS_PER_SCENE)
-
         for i in range(settings.CLIPS_PER_SCENE):
-            storage.update_clip_meta(pid, scene_idx, i, status="generating", error=None)
             clip_path = storage.clip_path(pid, scene_idx, i)
             workflow  = build_video_workflow(prompts[i])
 
@@ -418,19 +422,16 @@ async def _gen_clips(pid: str, scene_idx: int):
                 img_to_upload=seed_image,
             )
 
-            storage.set_clip(pid, scene_idx, i, str(clip_path))
+            storage.add_clip(pid, scene_idx, str(clip_path))
             storage.update_scene(pid, scene_idx, last_completed_clip=i)
-            storage.update_clip_meta(pid, scene_idx, i, status="done", error=None)
 
-            # Extract and SAVE last frame of this clip for downstream seeding
-            clip_last_frame = storage.clip_last_frame_path(pid, scene_idx, i)
-            await asyncio.to_thread(extract_last_frame, clip_path, clip_last_frame)
-
-            # Use this clip's last frame as the seed for the next clip
+            # Prepare seed for next clip — blocking ffmpeg off the event loop
             if i < settings.CLIPS_PER_SCENE - 1:
-                seed_image = clip_last_frame
+                last_frame = storage.last_frame_path(pid, scene_idx)
+                await asyncio.to_thread(extract_last_frame, clip_path, last_frame)
+                seed_image = last_frame
 
-        # Assemble 5 clips → 20s scene.mp4
+        # Assemble 5 clips → 20s scene.mp4 — blocking ffmpeg off the event loop
         clip_paths  = [storage.clip_path(pid, scene_idx, i)
                        for i in range(settings.CLIPS_PER_SCENE)]
         scene_video = storage.scene_video_path(pid, scene_idx)
@@ -443,77 +444,50 @@ async def _gen_clips(pid: str, scene_idx: int):
         storage.update_scene(pid, scene_idx, status="error", error=str(e))
 
 
-async def _regen_clip_chain(pid: str, scene_idx: int, start_clip_idx: int):
+async def _edit_clip(pid: str, scene_idx: int, req: EditClipReq, clip_path: Path):
     """
-    Regenerates clip_{start_clip_idx} and all downstream clips, then reassembles.
-
-    Seed resolution for each clip:
-      - clip_0   → source_image.png
-      - clip_N   → clip_{N-1}_last_frame.png   (the persisted per-clip last frame)
-
-    This means regenerating clip_2 will:
-      - use clip_1_last_frame.png as seed for the new clip_2
-      - extract new clip_2_last_frame.png
-      - regenerate clip_3 seeded by new clip_2_last_frame.png
-      - extract new clip_3_last_frame.png
-      - regenerate clip_4 seeded by new clip_3_last_frame.png
-      - reassemble scene.mp4
+    Edit a clip: trim, cut, split.
     """
     try:
-        scene   = storage.get_scene(pid, scene_idx)
-        prompts = scene["enhanced_prompts"]
-
-        # Determine the seed for start_clip_idx
-        if start_clip_idx == 0:
-            seed_image = Path(scene["source_image"])
-        else:
-            seed_image = storage.clip_last_frame_path(pid, scene_idx, start_clip_idx - 1)
-            if not seed_image.exists():
-                raise FileNotFoundError(
-                    f"Seed image not found for clip {start_clip_idx}: {seed_image}. "
-                    f"Ensure the previous clip's last frame was extracted during initial generation."
-                )
-
-        # Re-generate from start_clip_idx to the last clip
-        for i in range(start_clip_idx, settings.CLIPS_PER_SCENE):
-            storage.update_clip_meta(pid, scene_idx, i, status="generating", error=None)
-            clip_path = storage.clip_path(pid, scene_idx, i)
-            workflow  = build_video_workflow(prompts[i])
-
-            await comfy.run_job(
-                workflow,
-                dest_path=clip_path,
-                timeout=10000,
-                img_to_upload=seed_image,
-            )
-
-            storage.set_clip(pid, scene_idx, i, str(clip_path))
-            storage.update_scene(pid, scene_idx, last_completed_clip=i)
-            storage.update_clip_meta(pid, scene_idx, i, status="done", error=None)
-
-            # Extract and save the new last frame for downstream chaining
-            clip_last_frame = storage.clip_last_frame_path(pid, scene_idx, i)
-            await asyncio.to_thread(extract_last_frame, clip_path, clip_last_frame)
-
-            # Feed into next clip
-            if i < settings.CLIPS_PER_SCENE - 1:
-                seed_image = clip_last_frame
-
-        # Re-assemble scene.mp4 from all 5 (possibly mixed old+new) clips
-        clip_paths  = [storage.clip_path(pid, scene_idx, i)
-                       for i in range(settings.CLIPS_PER_SCENE)]
-        scene_video = storage.scene_video_path(pid, scene_idx)
-        await asyncio.to_thread(assemble_scene, clip_paths, scene_video)
-
-        storage.update_scene(pid, scene_idx,
-                             scene_video=str(scene_video),
-                             status="done",
-                             error=None)
-
+        output_path = storage.clip_path(pid, scene_idx, req.clip_index)
+        output_path = output_path.with_stem(f"{output_path.stem}_edited")
+        
+        await asyncio.to_thread(
+            edit_video, 
+            clip_path, 
+            output_path, 
+            req.start_time, 
+            req.end_time,
+            req.action,
+            req.split_position
+        )
+        
+        # Replace original with edited version
+        output_path.rename(clip_path)
+        
+        storage.update_scene(pid, scene_idx, last_edit=f"{req.action}_clip_{req.clip_index}")
     except Exception as e:
-        # Mark scene error but also tag which clip failed
-        storage.update_clip_meta(pid, scene_idx, start_clip_idx, status="error", error=str(e))
-        storage.update_scene(pid, scene_idx, status="error", error=str(e))
+        storage.update_scene(pid, scene_idx, error=str(e))
+
+
+async def _add_transition(clip_a: Path, clip_b: Path, output_path: Path, transition_type: str, duration: float):
+    """
+    Add transition between two clips.
+    """
+    try:
+        await asyncio.to_thread(add_transition, clip_a, clip_b, output_path, transition_type, duration)
+    except Exception as e:
+        print(f"Transition failed: {e}")
+
+
+async def _export_scene(clip_paths: List[Path], output_path: Path, quality: str):
+    """
+    Export scene with specified quality.
+    """
+    try:
+        await asyncio.to_thread(assemble_scene, clip_paths, output_path)
+    except Exception as e:
+        print(f"Export failed: {e}")
 
 
 async def _finalize(pid: str, done_scenes: list):
@@ -534,46 +508,3 @@ async def _finalize(pid: str, done_scenes: list):
                                final_status="done")
     except Exception as e:
         storage.update_project(pid, final_status="error", final_error=str(e))
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _enhance_single_clip_prompt(raw_prompt: str) -> str:
-    """
-    Enhances a single clip description through Groq for one clip override.
-    Uses the same video system prompt logic but asks for just ONE prompt string.
-    We call enhance_prompt (returns 5) and take the first result,
-    or fall back to a simplified inline call.
-    """
-    import httpx
-    from config import settings as cfg
-
-    system = """\
-You are a cinematic AI video director and prompt engineer.
-Expand the user's short scene description into ONE detailed video prompt
-for an img2vid model (LTX-Video 2.3) describing a 4-second clip.
-Include: subject action, camera movement, lighting, atmosphere.
-Be specific and vivid. Respond ONLY with the prompt string — no preamble,
-no quotes, no markdown.
-"""
-    payload = {
-        "model": cfg.GROQ_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user",   "content": raw_prompt},
-        ],
-        "temperature": 0.8,
-        "max_tokens":  400,
-    }
-    headers = {
-        "Authorization": f"Bearer {cfg.GROQ_API_KEY}",
-        "Content-Type":  "application/json",
-    }
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-        )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip().strip('"').strip("'")
