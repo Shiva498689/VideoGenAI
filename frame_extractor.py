@@ -18,7 +18,7 @@ def extract_last_frame(video_path: Path, output_path: Path) -> Path:
         cmd2 = [
             "ffmpeg", "-y",
             "-i", str(video_path),
-            "-vf", "thumbnail=300",
+            "-vf", "thumbnail=80",
             "-frames:v", "1",
             str(output_path),
         ]
