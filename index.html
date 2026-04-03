@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CineForge Studio | AI Video Generator</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-base: #0a0a0c;
+      --bg-surface: #121215;
+      --bg-surface-elevated: #1c1c22;
+      --border-color: #2a2a30;
+      --divider: rgba(255, 255, 255, 0.08);
+      
+      --primary: #7c3aed;
+      --primary-light: #8b5cf6;
+      --primary-hover: rgba(124, 58, 237, 0.12);
+      --primary-active: rgba(124, 58, 237, 0.2);
+      
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-disabled: #475569;
+      
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+
+      --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      --radius-card: 16px;
+      --radius-btn: 40px;
+      --radius-input: 12px;
+    }
+
+    body {
+      background: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-family);
+      font-size: 14px;
+      line-height: 1.5;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 10px; }
+
+    /* Layout */
+    .app-container {
+      display: grid;
+      grid-template-columns: 280px 1fr 340px;
+      grid-template-rows: 64px 1fr 240px;
+      grid-template-areas:
+        "header header header"
+        "sidebar preview inspector"
+        "sidebar timeline inspector";
+      height: 100vh;
+    }
+
+    /* Header */
+    header {
+      grid-area: header;
+      background: rgba(18, 18, 21, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #c084fc, #8b5cf6);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      letter-spacing: -0.3px;
+    }
+    .brand i { color: #8b5cf6; background: none; -webkit-background-clip: unset; background-clip: unset; }
+
+    .gpu-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      padding: 6px 14px;
+      background: var(--bg-surface-elevated);
+      border-radius: 40px;
+      border: 1px solid var(--border-color);
+    }
+    .gpu-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); transition: 0.3s; }
+    .gpu-dot.busy { background: var(--warning); animation: pulse 1s infinite; }
+
+    /* Sidebar */
+    .sidebar {
+      grid-area: sidebar;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .sidebar-section {
+      padding: 20px 0;
+      border-bottom: 1px solid var(--divider);
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px 12px 20px;
+    }
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+    .icon-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      transition: all 0.2s;
+    }
+    .icon-btn:hover { background: var(--primary-hover); color: var(--primary); }
+
+    .project-item, .scene-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 20px;
+      margin: 2px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .project-item:hover, .scene-item:hover { background: rgba(255,255,255,0.04); }
+    .project-item.active, .scene-item.active { background: var(--primary-active); color: var(--primary); border-left: 3px solid var(--primary); }
+    .status-badge { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* Preview Area */
+    .preview-area {
+      grid-area: preview;
+      background: var(--bg-base);
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .preview-card {
+      width: 100%;
+      height: 100%;
+      background: var(--bg-surface-elevated);
+      border-radius: 24px;
+      border: 1px solid var(--border-color);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .preview-content {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .preview-content img, .preview-content video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .preview-placeholder {
+      text-align: center;
+      color: var(--text-disabled);
+    }
+
+    /* Timeline */
+    .timeline {
+      grid-area: timeline;
+      background: var(--bg-surface-elevated);
+      border-top: 1px solid var(--border-color);
+      padding: 16px 24px;
+    }
+    .timeline-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    .timeline-tracks {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+    .timeline-clip {
+      min-width: 180px;
+      height: 90px;
+      background: var(--bg-base);
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .timeline-clip:hover { border-color: var(--primary); transform: translateY(-2px); }
+
+    /* Inspector */
+    .inspector {
+      grid-area: inspector;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border-color);
+      overflow-y: auto;
+    }
+    .inspector-header {
+      padding: 20px 24px;
+      font-size: 18px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--divider);
+    }
+    .inspector-body { padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+
+    /* Form Elements */
+    .input-group { display: flex; flex-direction: column; gap: 8px; }
+    .input-group label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+    input, textarea {
+      background: var(--bg-base);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 40px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-primary:hover { background: var(--primary-light); transform: scale(0.98); }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+    }
+    .btn-outline:hover { background: rgba(255,255,255,0.05); }
+
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 24px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .toast {
+      background: #1e1e2a;
+      backdrop-filter: blur(12px);
+      padding: 12px 20px;
+      border-radius: 12px;
+      border-left: 3px solid var(--primary);
+      font-size: 13px;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes pulse { 0% { opacity: 0.6; } 100% { opacity: 1; } }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+  <header>
+    <div class="brand"><i data-lucide="sparkles" style="width:22px;height:22px"></i> CineForge Studio</div>
+    <div class="gpu-status"><div class="gpu-dot" id="gpuDot"></div><span id="gpuLabel">IDLE</span></div>
+  </header>
+
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="section-header">
+        <span class="section-title">PROJECTS</span>
+        <button class="icon-btn" id="newProjectBtn" title="New Project"><i data-lucide="plus" style="width:16px;height:16px"></i></button>
+      </div>
+      <div id="projectsList"></div>
+    </div>
+    <div class="sidebar-section" style="flex:1">
+      <div class="section-header">
+        <span class="section-title">SCENES</span>
+        <span id="sceneCount" style="font-size:11px;background:var(--bg-base);padding:2px 8px;border-radius:20px;">0</span>
+      </div>
+      <div id="scenesList" style="flex:1"></div>
+      <div style="padding:16px 20px;margin-top:auto">
+        <button class="btn btn-outline" style="width:100%" id="addSceneBtn" disabled><i data-lucide="video" style="width:14px;height:14px"></i> Add Scene</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="preview-area">
+    <div class="preview-card">
+      <div class="preview-content" id="previewContent">
+        <div class="preview-placeholder">
+          <i data-lucide="clapperboard" style="width:64px;height:64px;margin-bottom:16px;opacity:0.4"></i>
+          <h3>Welcome to CineForge</h3>
+          <p style="color:var(--text-muted);margin-top:8px">Click <strong>+</strong> next to Projects to begin</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <section class="timeline">
+    <div class="timeline-header"><i data-lucide="film" style="width:16px"></i><span id="timelineLabel">Timeline</span></div>
+    <div class="timeline-tracks" id="timelineTracks"></div>
+  </section>
+
+  <aside class="inspector">
+    <div class="inspector-header" id="inspectorTitle">Properties</div>
+    <div class="inspector-body" id="inspectorBody"></div>
+  </aside>
+</div>
+<div id="toastContainer" class="toast-container"></div>
+
+<script>
+  // ---------- MOCK DATA & SIMULATION ----------
+  let projectsDB = [];
+  let nextProjId = 1;
+  let currentProjectId = null;
+  let currentSceneIdx = null;
+
+  // Helper: generate placeholder images/videos
+  function getMockImage(prompt, seed) {
+    const colors = ['8b5cf6', 'ec4899', '06b6d4', '10b981', 'f59e0b'];
+    const color = colors[seed % colors.length];
+    return `https://placehold.co/1024x576/${color}/1a1a2e?text=🎬+${encodeURIComponent(prompt.slice(0,20))}`;
+  }
+  function getMockVideo(idx) {
+    const samples = [
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFunflies.mp4',
+      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4'
+    ];
+    return samples[idx % samples.length];
+  }
+
+  function toast(msg, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toastDiv = document.createElement('div');
+    toastDiv.className = 'toast';
+    toastDiv.innerHTML = `<i data-lucide="${type === 'success' ? 'check-circle' : 'alert-circle'}" style="width:16px;height:16px;margin-right:8px"></i> ${msg}`;
+    container.appendChild(toastDiv);
+    lucide.createIcons();
+    setTimeout(() => toastDiv.remove(), 3000);
+  }
+
+  function setGPU(busy) {
+    const dot = document.getElementById('gpuDot');
+    const label = document.getElementById('gpuLabel');
+    if (busy) {
+      dot.classList.add('busy');
+      label.innerText = 'PROCESSING';
+    } else {
+      dot.classList.remove('busy');
+      label.innerText = 'READY';
+    }
+  }
+
+  // Save to localStorage
+  function saveToStorage() {
+    localStorage.setItem('cineforge_projects', JSON.stringify(projectsDB));
+  }
+
+  function loadFromStorage() {
+    const stored = localStorage.getItem('cineforge_projects');
+    if (stored) {
+      projectsDB = JSON.parse(stored);
+      nextProjId = Math.max(1, ...projectsDB.map(p => parseInt(p.id.split('_')[1]) || 0), 0) + 1;
+    } else {
+      // Demo project
+      projectsDB = [{
+        id: 'proj_1',
+        title: 'Demo Project',
+        scenes: [],
+        finalVideo: null,
+        finalStatus: null
+      }];
+      nextProjId = 2;
+      saveToStorage();
+    }
+  }
+
+  // API-like functions
+  async function apiCall(action, data) {
+    await new Promise(r => setTimeout(r, 300)); // simulate network
+    if (action === 'getProjects') return projectsDB;
+    
+    if (action === 'createProject') {
+      const newProj = {
+        id: `proj_${nextProjId++}`,
+        title: data.title,
+        scenes: [],
+        finalVideo: null,
+        finalStatus: null
+      };
+      projectsDB.push(newProj);
+      saveToStorage();
+      return newProj;
+    }
+    
+    if (action === 'addScene') {
+      const project = projectsDB.find(p => p.id === data.projectId);
+      if (!project) throw new Error('Project not found');
+      const sceneIdx = project.scenes.length;
+      const newScene = {
+        idx: sceneIdx,
+        prompt: data.prompt,
+        status: 'generating_image',
+        imageUrl: null,
+        videoUrl: null,
+        clips: [],
+        clipUrls: [],
+        clipPrompts: [],
+        clipMeta: {}
+      };
+      project.scenes.push(newScene);
+      saveToStorage();
+      
+      // Simulate image generation
+      setTimeout(async () => {
+        const scene = project.scenes[sceneIdx];
+        scene.imageUrl = getMockImage(data.prompt, sceneIdx);
+        scene.status = 'confirming';
+        saveToStorage();
+        refreshUI();
+        setGPU(false);
+      }, 2000);
+      return { sceneIdx };
+    }
+    
+    if (action === 'confirmImage') {
+      const project = projectsDB.find(p => p.id === data.projectId);
+      const scene = project.scenes[data.sceneIdx];
+      if (data.confirmed) {
+        scene.status = 'generating_clips';
+        setGPU(true);
+        saveToStorage();
+        refreshUI();
+        
+        // Generate 5 clips
+        const totalClips = 5;
+        for (let i = 0; i < totalClips; i++) {
+          scene.clipPrompts[i] = `${scene.prompt} (shot ${i+1} · cinematic)`;
+          scene.clipMeta[i] = { status: 'generating' };
+          saveToStorage();
+          refreshUI();
+          await new Promise(r => setTimeout(r, 800));
+          scene.clipUrls[i] = getMockVideo(i);
+          scene.clipMeta[i].status = 'done';
+          scene.clips.push({ idx: i, url: scene.clipUrls[i] });
+          saveToStorage();
+          refreshUI();
+        }
+        scene.status = 'done';
+        scene.videoUrl = scene.clipUrls[0];
+        saveToStorage();
+        refreshUI();
+        setGPU(false);
+        toast('Scene completed! You can now edit clips.', 'success');
+      } else {
+        scene.status = 'generating_image';
+        setGPU(true);
+        saveToStorage();
+        refreshUI();
+        setTimeout(() => {
+          scene.imageUrl = getMockImage(scene.prompt + ' retry', data.sceneIdx + 100);
+          scene.status = 'confirming';
+          saveToStorage();
+          refreshUI();
+          setGPU(false);
+          toast('Image regenerated', 'info');
+        }, 1800);
+      }
+      return { success: true };
+    }
+    
+    if (action === 'regenerateClip') {
+      const project = projectsDB.find(p => p.id === data.projectId);
+      const scene = project.scenes[data.sceneIdx];
+      const clipIdx = data.clipIdx;
+      const newPrompt = data.prompt || scene.clipPrompts[clipIdx];
+      
+      scene.clipPrompts[clipIdx] = newPrompt;
+      scene.clipMeta[clipIdx] = { status: 'generating' };
+      scene.status = 'regenerating_clip';
+      setGPU(true);
+      saveToStorage();
+      refreshUI();
+      await new Promise(r => setTimeout(r, 1500));
+      scene.clipUrls[clipIdx] = getMockVideo(clipIdx + 50);
+      scene.clipMeta[clipIdx].status = 'done';
+      
+      // regenerate downstream clips for continuity
+      for (let j = clipIdx + 1; j < 5; j++) {
+        if (scene.clipUrls[j]) {
+          scene.clipMeta[j] = { status: 'generating' };
+          saveToStorage();
+          refreshUI();
+          await new Promise(r => setTimeout(r, 800));
+          scene.clipUrls[j] = getMockVideo(j + 100);
+          scene.clipMeta[j].status = 'done';
+        }
+      }
+      scene.status = 'done';
+      scene.videoUrl = scene.clipUrls[0];
+      saveToStorage();
+      refreshUI();
+      setGPU(false);
+      toast(`Clip ${clipIdx+1} regenerated with new style!`, 'success');
+      return { success: true };
+    }
+    
+    if (action === 'finalizeProject') {
+      const project = projectsDB.find(p => p.id === data.projectId);
+      project.finalStatus = 'processing';
+      setGPU(true);
+      saveToStorage();
+      refreshUI();
+      await new Promise(r => setTimeout(r, 3500));
+      project.finalStatus = 'done';
+      project.finalVideo = getMockVideo(99);
+      saveToStorage();
+      refreshUI();
+      setGPU(false);
+      toast('Final video exported!', 'success');
+      return { success: true };
+    }
+    
+    return null;
+  }
+
+  // UI Rendering
+  function renderProjects() {
+    const container = document.getElementById('projectsList');
+    if (!projectsDB.length) {
+      container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No projects</div>';
+      return;
+    }
+    container.innerHTML = projectsDB.map(proj => `
+      <div class="project-item ${currentProjectId === proj.id ? 'active' : ''}" data-id="${proj.id}">
+        <i data-lucide="folder" style="width:16px;height:16px"></i>
+        <span style="flex:1;font-weight:500">${escapeHtml(proj.title)}</span>
+        ${proj.finalStatus === 'done' ? '<i data-lucide="check-circle" style="width:14px;height:14px;color:var(--success)"></i>' : ''}
+      </div>
+    `).join('');
+    lucide.createIcons();
+    document.querySelectorAll('.project-item').forEach(el => {
+      el.addEventListener('click', () => selectProject(el.dataset.id));
+    });
+  }
+
+  function renderScenes() {
+    const container = document.getElementById('scenesList');
+    const countSpan = document.getElementById('sceneCount');
+    if (!currentProjectId) {
+      container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Select a project</div>';
+      countSpan.innerText = '0';
+      return;
+    }
+    const project = projectsDB.find(p => p.id === currentProjectId);
+    if (!project || !project.scenes.length) {
+      container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No scenes yet.<br>Click "Add Scene"</div>';
+      countSpan.innerText = '0';
+      return;
+    }
+    countSpan.innerText = project.scenes.length;
+    container.innerHTML = project.scenes.map((scene, idx) => {
+      const statusColor = scene.status === 'done' ? 'var(--success)' : 
+                         scene.status === 'confirming' ? 'var(--primary)' :
+                         scene.status.includes('generating') ? 'var(--warning)' : 'var(--text-disabled)';
+      const spinIcon = scene.status.includes('generating') ? '<i data-lucide="loader-2" class="spin" style="width:12px;height:12px"></i>' : '';
+      return `
+        <div class="scene-item ${currentSceneIdx === idx ? 'active' : ''}" data-idx="${idx}">
+          <div class="status-badge" style="background:${statusColor}"></div>
+          <span style="flex:1">Scene ${idx + 1}</span>
+          ${spinIcon}
+        </div>
+      `;
+    }).join('');
+    lucide.createIcons();
+    document.querySelectorAll('.scene-item').forEach(el => {
+      el.addEventListener('click', () => selectScene(parseInt(el.dataset.idx)));
+    });
+  }
+
+  function renderInspector() {
+    const inspectorTitle = document.getElementById('inspectorTitle');
+    const inspectorBody = document.getElementById('inspectorBody');
+    
+    if (!currentProjectId) {
+      inspectorTitle.innerText = 'No Project';
+      inspectorBody.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px 0">Select or create a project</div>';
+      return;
+    }
+    const project = projectsDB.find(p => p.id === currentProjectId);
+    if (currentSceneIdx === null) {
+      inspectorTitle.innerText = `Project: ${project.title}`;
+      const doneCount = project.scenes.filter(s => s.status === 'done').length;
+      inspectorBody.innerHTML = `
+        <div style="background:var(--bg-surface-elevated);border-radius:16px;padding:16px">
+          <div style="font-size:28px;font-weight:700">${project.scenes.length}</div>
+          <div style="color:var(--text-muted)">Total Scenes</div>
+          <div style="margin-top:12px"><span style="color:var(--success)">●</span> ${doneCount} Completed</div>
+        </div>
+        ${project.finalStatus === 'done' ? 
+          `<button class="btn btn-primary" id="downloadFinalBtn" style="width:100%"><i data-lucide="download"></i> Download Final Video</button>` :
+          project.scenes.length > 0 && project.scenes.every(s => s.status === 'done') ?
+          `<button class="btn btn-primary" id="finalizeBtn" style="width:100%"><i data-lucide="sparkles"></i> Export Final Video</button>` :
+          `<button class="btn btn-outline" disabled style="width:100%;opacity:0.5">Complete all scenes to export</button>`
+        }
+        <hr style="border-color:var(--divider);margin:8px 0">
+        <button class="btn btn-outline" id="addSceneFromInspectorBtn" style="width:100%"><i data-lucide="plus"></i> Add New Scene</button>
+      `;
+      lucide.createIcons();
+      document.getElementById('finalizeBtn')?.addEventListener('click', () => finalizeProject());
+      document.getElementById('downloadFinalBtn')?.addEventListener('click', () => {
+        if(project.finalVideo) window.open(project.finalVideo, '_blank');
+      });
+      document.getElementById('addSceneFromInspectorBtn')?.addEventListener('click', () => showAddScene());
+      return;
+    }
+    
+    const scene = project.scenes[currentSceneIdx];
+    inspectorTitle.innerText = `Scene ${currentSceneIdx + 1}`;
+    if (scene.status === 'confirming') {
+      inspectorBody.innerHTML = `
+        <div style="background:rgba(124,58,237,0.1);border-radius:16px;padding:20px;text-align:center">
+          <i data-lucide="image" style="width:40px;height:40px;color:var(--primary)"></i>
+          <h4 style="margin:12px 0">Review Generated Image</h4>
+          <div style="display:flex;gap:12px;margin-top:16px">
+            <button class="btn btn-primary" id="approveImg" style="flex:1">Approve</button>
+            <button class="btn btn-outline" id="rejectImg" style="flex:1">Regenerate</button>
+          </div>
+        </div>
+        <div class="input-group">
+          <label>Edit Prompt & Retry</label>
+          <textarea id="editPrompt" rows="3" class="input">${escapeHtml(scene.prompt)}</textarea>
+          <button class="btn btn-outline" id="retryWithPrompt">Retry with new prompt</button>
+        </div>
+      `;
+      lucide.createIcons();
+      document.getElementById('approveImg')?.addEventListener('click', () => confirmImage(true));
+      document.getElementById('rejectImg')?.addEventListener('click', () => confirmImage(false));
+      document.getElementById('retryWithPrompt')?.addEventListener('click', () => {
+        const newPrompt = document.getElementById('editPrompt').value;
+        if(newPrompt) regenerateScenePrompt(newPrompt);
+      });
+    } else if (scene.status === 'done') {
+      inspectorBody.innerHTML = `
+        <div style="background:rgba(16,185,129,0.1);border-radius:16px;padding:12px;color:var(--success);display:flex;align-items:center;gap:8px">
+          <i data-lucide="check-circle"></i> <span>Scene Complete — Click any clip in timeline to edit</span>
+        </div>
+        <div class="input-group"><label>Original Prompt</label><div class="card" style="padding:12px;background:var(--bg-base);border-radius:12px">${escapeHtml(scene.prompt)}</div></div>
+      `;
+      lucide.createIcons();
+    } else if (scene.status.includes('generating')) {
+      inspectorBody.innerHTML = `<div style="text-align:center;padding:40px"><i data-lucide="loader-2" class="spin" style="width:32px;height:32px;color:var(--primary)"></i><p style="margin-top:16px">AI is crafting your scene...</p></div>`;
+      lucide.createIcons();
+    } else {
+      inspectorBody.innerHTML = `<div style="color:var(--text-muted);text-align:center">Scene status: ${scene.status}</div>`;
+    }
+  }
+
+  function renderTimeline() {
+    const timelineTracks = document.getElementById('timelineTracks');
+    const timelineLabel = document.getElementById('timelineLabel');
+    if (!currentProjectId || currentSceneIdx === null || currentSceneIdx === 'new') {
+      timelineTracks.innerHTML = '<div style="color:var(--text-muted);padding:20px">Select a scene to see timeline</div>';
+      return;
+    }
+    const project = projectsDB.find(p => p.id === currentProjectId);
+    const scene = project.scenes[currentSceneIdx];
+    timelineLabel.innerText = `Timeline · Scene ${currentSceneIdx+1}`;
+    if (!scene.clipUrls || scene.clipUrls.length === 0) {
+      timelineTracks.innerHTML = '<div style="color:var(--text-muted)">Clips will appear after image approval</div>';
+      return;
+    }
+    timelineTracks.innerHTML = scene.clipUrls.map((url, i) => {
+      const isGenerating = scene.clipMeta?.[i]?.status === 'generating';
+      return `
+        <div class="timeline-clip" data-clip="${i}" style="border-bottom:3px solid ${isGenerating ? 'var(--warning)' : 'var(--primary)'}">
+          ${url && !isGenerating ? `<video src="${url}" style="width:100%;height:100%;object-fit:cover"></video>` : 
+            `<div style="display:flex;align-items:center;justify-content:center;height:100%"><i data-lucide="loader-2" class="spin" style="color:var(--warning)"></i></div>`}
+          <div style="position:absolute;bottom:4px;left:8px;background:rgba(0,0,0,0.7);padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600">Clip ${i+1}</div>
+          ${scene.status === 'done' ? '<div style="position:absolute;top:4px;right:8px;background:rgba(124,58,237,0.9);border-radius:20px;padding:2px 8px;font-size:9px">✎ Edit</div>' : ''}
+        </div>
+      `;
+    }).join('');
+    lucide.createIcons();
+    document.querySelectorAll('.timeline-clip').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const clipIdx = parseInt(el.dataset.clip);
+        if (scene.status === 'done') openClipEditor(currentSceneIdx, clipIdx);
+        else toast('Wait until scene is complete to edit clips', 'info');
+      });
+    });
+  }
+
+  function openClipEditor(sceneIdx, clipIdx) {
+    const project = projectsDB.find(p => p.id === currentProjectId);
+    const scene = project.scenes[sceneIdx];
+    const currentPrompt = scene.clipPrompts?.[clipIdx] || '';
+    const newPrompt = prompt(`Edit prompt for Clip ${clipIdx+1} (will regenerate this and downstream clips):`, currentPrompt);
+    if (newPrompt && newPrompt.trim()) {
+      regenerateClip(sceneIdx, clipIdx, newPrompt.trim());
+    }
+  }
+
+  async function regenerateClip(sceneIdx, clipIdx, newPrompt) {
+    setGPU(true);
+    await apiCall('regenerateClip', { projectId: currentProjectId, sceneIdx, clipIdx, prompt: newPrompt });
+    refreshUI();
+  }
+
+  async function regenerateScenePrompt(newPrompt) {
+    const project = projectsDB.find(p => p.id === currentProjectId);
+    const scene = project.scenes[currentSceneIdx];
+    scene.prompt = newPrompt;
+    scene.status = 'generating_image';
+    scene.imageUrl = null;
+    saveToStorage();
+    refreshUI();
+    setGPU(true);
+    setTimeout(async () => {
+      scene.imageUrl = getMockImage(newPrompt, currentSceneIdx + 200);
+      scene.status = 'confirming';
+      saveToStorage();
+      refreshUI();
+      setGPU(false);
+    }, 2000);
+  }
+
+  async function confirmImage(approved) {
+    setGPU(true);
+    await apiCall('confirmImage', { projectId: currentProjectId, sceneIdx: currentSceneIdx, confirmed: approved });
+    refreshUI();
+  }
+
+  async function finalizeProject() {
+    await apiCall('finalizeProject', { projectId: currentProjectId });
+    refreshUI();
+  }
+
+  function showAddScene() {
+    const promptTxt = prompt('Describe your scene (e.g., "a futuristic city at sunset with flying cars"):');
+    if (promptTxt && promptTxt.trim()) {
+      createNewScene(promptTxt.trim());
+    }
+  }
+  
+  async function createNewScene(prompt) {
+    setGPU(true);
+    await apiCall('addScene', { projectId: currentProjectId, prompt });
+    refreshUI();
+    const project = projectsDB.find(p => p.id === currentProjectId);
+    if (project) {
+      currentSceneIdx = project.scenes.length - 1;
+      refreshUI();
+    }
+  }
+
+  async function selectProject(id) {
+    currentProjectId = id;
+    currentSceneIdx = null;
+    const addBtn = document.getElementById('addSceneBtn');
+    if(addBtn) addBtn.disabled = false;
+    refreshUI();
+  }
+
+  function selectScene(idx) {
+    currentSceneIdx = idx;
+    refreshUI();
+  }
+
+  function refreshUI() {
+    renderProjects();
+    renderScenes();
+    renderInspector();
+    renderTimeline();
+    renderPreview();
+  }
+
+  function renderPreview() {
+    const previewDiv = document.getElementById('previewContent');
+    if (!currentProjectId) {
+      previewDiv.innerHTML = `<div class="preview-placeholder"><i data-lucide="clapperboard" style="width:64px;height:64px"></i><h3>No Project Selected</h3></div>`;
+      lucide.createIcons();
+      return;
+    }
+    const project = projectsDB.find(p => p.id === currentProjectId);
+    if (currentSceneIdx === null) {
+      if (project.finalVideo && project.finalStatus === 'done') {
+        previewDiv.innerHTML = `<video src="${project.finalVideo}" controls autoplay style="width:100%;height:100%;object-fit:contain"></video>`;
+      } else {
+        previewDiv.innerHTML = `<div class="preview-placeholder"><i data-lucide="layout-dashboard" style="width:48px;height:48px"></i><h3>${escapeHtml(project.title)}</h3><p style="color:var(--text-muted)">Select a scene or add new</p></div>`;
+      }
+      lucide.createIcons();
+      return;
+    }
+    const scene = project.scenes[currentSceneIdx];
+    if (scene.status === 'confirming' && scene.imageUrl) {
+      previewDiv.innerHTML = `<img src="${scene.imageUrl}" style="border-radius:16px;max-height:100%">`;
+    } else if (scene.status === 'done' && scene.videoUrl) {
+      previewDiv.innerHTML = `<video src="${scene.videoUrl}" controls autoplay loop style="width:100%;height:100%;object-fit:contain"></video>`;
+    } else if (scene.status.includes('generating')) {
+      previewDiv.innerHTML = `<div class="preview-placeholder"><i data-lucide="loader-2" class="spin" style="width:48px;height:48px;color:var(--primary)"></i><p>Generating...</p></div>`;
+    } else if (scene.imageUrl) {
+      previewDiv.innerHTML = `<img src="${scene.imageUrl}" style="border-radius:16px">`;
+    } else {
+      previewDiv.innerHTML = `<div class="preview-placeholder"><i data-lucide="image" style="width:48px;height:48px"></i><p>No media yet</p></div>`;
+    }
+    lucide.createIcons();
+  }
+
+  function escapeHtml(str) { return str.replace(/[&<>]/g, function(m){if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+
+  // Event binding
+  document.getElementById('newProjectBtn').addEventListener('click', async () => {
+    const name = prompt('Project name:', 'My Awesome Film');
+    if (name) {
+      await apiCall('createProject', { title: name });
+      refreshUI();
+      if(projectsDB.length) selectProject(projectsDB[projectsDB.length-1].id);
+      toast(`Project "${name}" created`, 'success');
+    }
+  });
+  document.getElementById('addSceneBtn').addEventListener('click', () => {
+    if(currentProjectId) showAddScene();
+    else toast('Select a project first', 'error');
+  });
+
+  loadFromStorage();
+  if (projectsDB.length) selectProject(projectsDB[0].id);
+  refreshUI();
+  setGPU(false);
+</script>
+</body>
+</html>

@@ -1,10 +1,37 @@
+"""
+StorageManager — filesystem layout + JSON index
+
+outputs/
+├── index.json                          ← master metadata store
+└── projects/
+    └── {project_id}/
+        ├── scenes/
+        │   └── {scene_idx}/
+        │       ├── source_image.png    ← txt2img keyframe (confirmed by user)
+        │       ├── last_frame.png      ← last frame of previous clip (seed for clip 0)
+        │       ├── clips/
+        │       │   ├── clip_0.mp4
+        │       │   ├── clip_0_last_frame.png   ← last frame of clip_0 (seed for clip_1)
+        │       │   ├── clip_1.mp4
+        │       │   ├── clip_1_last_frame.png
+        │       │   ├── clip_2.mp4
+        │       │   ├── clip_2_last_frame.png
+        │       │   ├── clip_3.mp4
+        │       │   ├── clip_3_last_frame.png
+        │       │   └── clip_4.mp4
+        │       └── scene.mp4           ← 5 clips assembled → 20s
+        └── final.mp4                   ← all scenes with lightning transitions
+"""
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 class StorageManager:
     def __init__(self, output_dir: Path):
@@ -19,6 +46,8 @@ class StorageManager:
             self._idx = {"projects": {}}
             self._flush()
 
+    # ── Projects ──────────────────────────────────────────────────────────────
+
     def create_project(self, title: str = "Untitled") -> dict:
         pid     = str(uuid4())
         project = {
@@ -27,7 +56,7 @@ class StorageManager:
             "created_at":   _now(),
             "scenes":       [],
             "final_video":  None,
-            "final_status": "idle",    
+            "final_status": "idle",     # idle | processing | done | error
         }
         self._idx["projects"][pid] = project
         self.project_dir(pid).mkdir(parents=True, exist_ok=True)
@@ -48,6 +77,7 @@ class StorageManager:
         self._idx["projects"][pid].update(kwargs)
         self._flush()
 
+    # ── Scenes ────────────────────────────────────────────────────────────────
 
     def add_scene(
         self,
@@ -60,13 +90,19 @@ class StorageManager:
         scene = {
             "scene_idx":             scene_idx,
             "raw_prompt":            raw_prompt,
-            "enhanced_prompts":      enhanced_prompts,
-            "enhanced_image_prompt": None,
+            "enhanced_prompts":      enhanced_prompts,  # 5 clip prompts
+            "enhanced_image_prompt": None,               # set separately
             "source_image":          None,
             "clips":                 [],
+            # Per-clip metadata: index → {status, prompt_override, error}
+            # status: pending | generating | done | error
+            "clip_meta":             {},
             "last_completed_clip":   -1,
             "scene_video":           None,
             "status": "pending",
+            # pending → generating_image → confirming → generating_clips → done | error
+            # NOTE: status stays "done" even when a clip is being regenerated;
+            # check clip_meta[clip_idx]["status"] for per-clip progress.
             "error":      None,
             "created_at": _now(),
         }
@@ -87,9 +123,42 @@ class StorageManager:
         self._flush()
 
     def add_clip(self, pid: str, scene_idx: int, clip_path: str):
-        self._idx["projects"][pid]["scenes"][scene_idx]["clips"].append(clip_path)
+        clips = self._idx["projects"][pid]["scenes"][scene_idx]["clips"]
+        clip_idx = len(clips)
+        # Append or replace at index
+        if clip_idx < len(clips):
+            clips[clip_idx] = clip_path
+        else:
+            clips.append(clip_path)
         self._flush()
 
+    def set_clip(self, pid: str, scene_idx: int, clip_idx: int, clip_path: str):
+        """Set (or replace) a specific clip by index."""
+        clips = self._idx["projects"][pid]["scenes"][scene_idx]["clips"]
+        # Extend list if needed
+        while len(clips) <= clip_idx:
+            clips.append(None)
+        clips[clip_idx] = clip_path
+        self._flush()
+
+    def update_clip_meta(self, pid: str, scene_idx: int, clip_idx: int, **kwargs):
+        """Update per-clip metadata dictionary."""
+        scene = self._idx["projects"][pid]["scenes"][scene_idx]
+        if "clip_meta" not in scene:
+            scene["clip_meta"] = {}
+        key = str(clip_idx)
+        if key not in scene["clip_meta"]:
+            scene["clip_meta"][key] = {}
+        scene["clip_meta"][key].update(kwargs)
+        self._flush()
+
+    def get_clip_meta(self, pid: str, scene_idx: int, clip_idx: int) -> dict:
+        scene = self.get_scene(pid, scene_idx)
+        if not scene:
+            return {}
+        return scene.get("clip_meta", {}).get(str(clip_idx), {})
+
+    # ── Paths ─────────────────────────────────────────────────────────────────
 
     def project_dir(self, pid: str) -> Path:
         return self.root / "projects" / pid
@@ -101,7 +170,21 @@ class StorageManager:
         return self.scene_dir(pid, scene_idx) / "source_image.png"
 
     def last_frame_path(self, pid: str, scene_idx: int) -> Path:
+        """Legacy: last frame of source image used as seed for clip_0."""
         return self.scene_dir(pid, scene_idx) / "last_frame.png"
+
+    def clip_last_frame_path(self, pid: str, scene_idx: int, clip_idx: int) -> Path:
+        """
+        Stores the last frame of clip_{clip_idx}.png.
+        This is the seed image for clip_{clip_idx + 1}.
+        Kept separate per clip so that when clip_N is regenerated,
+        we can re-extract its last frame and re-chain only the downstream clips.
+        """
+        return (
+            self.scene_dir(pid, scene_idx)
+            / "clips"
+            / f"clip_{clip_idx}_last_frame.png"
+        )
 
     def clip_path(self, pid: str, scene_idx: int, clip_idx: int) -> Path:
         return self.scene_dir(pid, scene_idx) / "clips" / f"clip_{clip_idx}.mp4"
@@ -112,6 +195,7 @@ class StorageManager:
     def final_video_path(self, pid: str) -> Path:
         return self.project_dir(pid) / "final.mp4"
 
+    # ── URL helpers (relative to OUTPUT_DIR, for /files/ mount) ──────────────
 
     def rel_url(self, abs_path: str | Path) -> str:
         try:
@@ -119,6 +203,8 @@ class StorageManager:
             return f"/files/{rel}"
         except ValueError:
             return ""
+
+    # ── Internal ──────────────────────────────────────────────────────────────
 
     def _flush(self):
         with open(self.index_path, "w") as f:
