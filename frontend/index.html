@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CineForge Studio Workspace</title>
+  <title>CineForge Studio - AI Video Editor & Generator</title>
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,8 +20,8 @@
       --border-color: #3c4043;
       --divider: rgba(255, 255, 255, 0.12);
       
-      --primary: #8ab4f8; /* Google Blue */
-      --primary-hover: rgba(138, 180, 248, 0.08); /* State layers */
+      --primary: #8ab4f8;
+      --primary-hover: rgba(138, 180, 248, 0.08);
       --primary-active: rgba(138, 180, 248, 0.12);
       
       --text-main: #e8eaed;
@@ -35,7 +35,7 @@
       --font-family: 'Open Sans', 'Roboto', system-ui, sans-serif;
       --font-display: 'Product Sans', 'Open Sans', sans-serif;
       
-      --radius-btn: 100px; /* Pill */
+      --radius-btn: 100px;
       --radius-card: 12px;
       --radius-input: 8px;
     }
@@ -54,7 +54,6 @@
 
     input, textarea, button { font-family: inherit; }
 
-    /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #5f6368; border-radius: 8px; }
@@ -64,7 +63,7 @@
     .app-container {
       display: grid;
       grid-template-columns: 260px 1fr 320px;
-      grid-template-rows: 64px 1fr 220px;
+      grid-template-rows: 64px 1fr 280px;
       grid-template-areas:
         "header header header"
         "sidebar preview inspector"
@@ -72,14 +71,12 @@
       height: 100vh;
     }
 
-    /* Base Containers */
     .surface {
       background: var(--bg-surface);
       display: flex;
       flex-direction: column;
     }
     
-    /* Header - Top App Bar */
     header {
       grid-area: header;
       background: var(--bg-base);
@@ -138,12 +135,12 @@
     .gpu-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); transition: 0.3s; }
     .gpu-dot.busy { background: var(--warning); animation: pulse 1s infinite alternate; }
 
-    /* Sidebar - Navigation Drawer */
     .sidebar {
       grid-area: sidebar;
       background: var(--bg-surface);
       border-right: 1px solid var(--border-color);
       padding: 12px 0;
+      overflow-y: auto;
     }
     .sidebar-section {
       display: flex;
@@ -165,7 +162,7 @@
       align-items: center;
       gap: 16px;
       padding: 10px 24px;
-      margin-right: 12px; /* For Google pill active state */
+      margin-right: 12px;
       border-radius: 0 100px 100px 0;
       cursor: pointer;
       color: var(--text-main);
@@ -180,7 +177,6 @@
 
     .status-indicator { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
-    /* Main Preview Area */
     .preview-area {
       grid-area: preview;
       background: var(--bg-base);
@@ -231,11 +227,12 @@
       z-index: 5;
     }
 
-    /* Timeline Container */
     .timeline {
       grid-area: timeline;
       background: var(--bg-surface-elevated);
       border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
     }
     .timeline-header {
       padding: 12px 24px;
@@ -253,6 +250,8 @@
       display: flex;
       gap: 12px;
       align-items: center;
+      flex: 1;
+      min-height: 120px;
     }
     .track-segment {
       height: 100px;
@@ -285,7 +284,15 @@
       pointer-events: none;
     }
 
-    /* Inspector Side Panel */
+    .editing-toolbar {
+      padding: 12px 24px;
+      border-top: 1px solid var(--divider);
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
     .inspector {
       grid-area: inspector;
       background: var(--bg-surface);
@@ -306,7 +313,6 @@
       gap: 24px;
     }
 
-    /* Form Controls */
     .input-group {
       display: flex;
       flex-direction: column;
@@ -320,7 +326,7 @@
       align-items: center;
       gap: 8px;
     }
-    .input, .textarea {
+    .input, .textarea, select {
       background: var(--bg-base);
       border: 1px solid var(--border-color);
       color: var(--text-main);
@@ -330,15 +336,14 @@
       transition: border 0.2s, box-shadow 0.2s;
       resize: vertical;
     }
-    .input:hover, .textarea:hover { border-color: var(--text-muted); }
-    .input:focus, .textarea:focus {
+    .input:hover, .textarea:hover, select:hover { border-color: var(--text-muted); }
+    .input:focus, .textarea:focus, select:focus {
       outline: none;
       border-color: var(--primary);
       box-shadow: inset 0 0 0 1px var(--primary);
     }
     .input::placeholder, .textarea::placeholder { color: var(--text-disabled); }
 
-    /* Buttons */
     .btn {
       display: inline-flex;
       align-items: center;
@@ -367,11 +372,9 @@
     .btn-icon { padding: 6px; border-radius: 50%; color: var(--text-muted); background: transparent; }
     .btn-icon:hover { background: rgba(255,255,255,0.04); color: var(--text-main); }
 
-    /* Specialized Buttons */
     .btn-success { background: var(--success); color: var(--bg-base); }
     .btn-danger { background: var(--danger); color: var(--bg-base); }
 
-    /* Display chips & cards */
     .card {
       background: var(--bg-surface-elevated);
       border: 1px solid var(--border-color);
@@ -387,6 +390,7 @@
       font-size: 13px;
       color: var(--text-main);
       position: relative;
+      margin-bottom: 8px;
     }
     .prompt-card::before {
       content: attr(data-number);
@@ -406,14 +410,31 @@
       font-weight: 500;
     }
 
-    /* Utilities */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    }
+    .modal {
+      background: var(--bg-surface);
+      border-radius: 12px;
+      padding: 24px;
+      min-width: 400px;
+      max-width: 500px;
+    }
+
     .spin { animation: spin 1s linear infinite; }
     @keyframes spin { 100% { transform: rotate(360deg); } }
-    @keyframes pulse { 0% { opacity: 0.6; box-shadow: 0 0 0 var(--warning); } 100% { opacity: 1; box-shadow: 0 0 8px var(--warning); } }
+    @keyframes pulse { 0% { opacity: 0.6; } 100% { opacity: 1; box-shadow: 0 0 8px var(--warning); } }
     
     .divider { height: 1px; background: var(--divider); margin: 24px 0; border: none; }
+    .divider-vertical { width: 1px; height: 24px; background: var(--divider); margin: 0 8px; }
 
-    /* Notifications (Snackbar style) */
     .toast-container {
       position: fixed;
       bottom: 24px; left: 24px;
@@ -430,7 +451,7 @@
       display: flex;
       align-items: center;
       gap: 16px;
-      box-shadow: 0 3px 5px -1px rgba(0,0,0,.2), 0 6px 10px 0 rgba(0,0,0,.14), 0 1px 18px 0 rgba(0,0,0,.12);
+      box-shadow: 0 3px 5px -1px rgba(0,0,0,.2);
       font-size: 14px;
       animation: slideRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
@@ -444,14 +465,13 @@
 
   <div class="app-container">
     
-    <!-- Top App Bar -->
     <header>
       <div class="brand">
         <i data-lucide="layers"></i> CineForge
       </div>
 
       <div class="header-center">
-        <div class="header-tab active">Workspace</div>
+        <div class="header-tab active">Studio</div>
       </div>
 
       <div class="header-right">
@@ -464,7 +484,6 @@
       </div>
     </header>
 
-    <!-- Navigation Drawer -->
     <aside class="sidebar">
       <div class="sidebar-section">
         <div class="section-title">
@@ -484,14 +503,16 @@
         <div id="scenes-list" style="overflow-y:auto;flex:1;margin-bottom:12px"></div>
         
         <div style="padding: 0 16px; margin-top: auto;">
-            <button class="btn btn-outline" style="width:100%" id="btn-add-scene" onclick="showAddScene()" disabled>
-              <i data-lucide="video" style="width:16px;height:16px"></i> Add Scene
-            </button>
+          <button class="btn btn-outline" style="width:100%" id="btn-add-scene" onclick="showAddScene()" disabled>
+            <i data-lucide="video" style="width:16px;height:16px"></i> Add Scene
+          </button>
+          <button class="btn btn-outline" style="width:100%; margin-top: 8px;" id="btn-upload-video" onclick="uploadVideoToScene()" disabled>
+            <i data-lucide="upload" style="width:16px;height:16px"></i> Upload Video
+          </button>
         </div>
       </div>
     </aside>
 
-    <!-- Main Content Area -->
     <main class="preview-area">
       <div class="preview-container">
         <div class="preview-overlay-status" id="preview-status" style="display:none">
@@ -502,7 +523,6 @@
       </div>
     </main>
 
-    <!-- Bottom Timeline -->
     <section class="timeline">
       <div class="timeline-header">
         <i data-lucide="film" style="width:16px;height:16px"></i>
@@ -511,9 +531,30 @@
       <div class="timeline-tracks" id="timeline-tracks">
         <div style="color:var(--text-disabled);margin:auto">No items in timeline</div>
       </div>
+      <div class="editing-toolbar">
+        <button class="btn btn-outline" onclick="startTrimMode()" style="padding: 6px 12px;">
+          <i data-lucide="scissors" style="width: 16px; height: 16px;"></i> Trim
+        </button>
+        <button class="btn btn-outline" onclick="startCutMode()" style="padding: 6px 12px;">
+          <i data-lucide="cut" style="width: 16px; height: 16px;"></i> Cut
+        </button>
+        <button class="btn btn-outline" onclick="startSplitMode()" style="padding: 6px 12px;">
+          <i data-lucide="split" style="width: 16px; height: 16px;"></i> Split
+        </button>
+        <div class="divider-vertical"></div>
+        <button class="btn btn-outline" onclick="showTransitionDialog()" style="padding: 6px 12px;">
+          <i data-lucide="sparkles" style="width: 16px; height: 16px;"></i> Transition
+        </button>
+        <button class="btn btn-outline" onclick="showReorderDialog()" style="padding: 6px 12px;">
+          <i data-lucide="move" style="width: 16px; height: 16px;"></i> Reorder
+        </button>
+        <div class="divider-vertical"></div>
+        <button class="btn btn-primary" onclick="exportCurrentScene()" style="padding: 6px 12px;">
+          <i data-lucide="download" style="width: 16px; height: 16px;"></i> Export Scene
+        </button>
+      </div>
     </section>
 
-    <!-- Right Properties Panel -->
     <aside class="inspector">
       <div class="inspector-header" id="inspector-header">Properties</div>
       <div class="inspector-body" id="inspector-body">
@@ -530,6 +571,7 @@
     let S = {
       projects: [], project: null, pid: null, sceneIdx: null, polls: {}
     };
+    let editMode = null;
 
     const DOM = {
       projectsList: document.getElementById('projects-list'),
@@ -541,7 +583,8 @@
       inspectorHeader: document.getElementById('inspector-header'),
       inspectorBody: document.getElementById('inspector-body'),
       headerActions: document.getElementById('header-actions'),
-      btnAddScene: document.getElementById('btn-add-scene')
+      btnAddScene: document.getElementById('btn-add-scene'),
+      btnUploadVideo: document.getElementById('btn-upload-video')
     };
 
     const STATUS_COLORS = {
@@ -549,6 +592,7 @@
       generating_image: 'var(--warning)',
       confirming: 'var(--primary)',
       generating_clips: 'var(--primary)',
+      editing: 'var(--primary)',
       done: 'var(--success)',
       error: 'var(--danger)'
     };
@@ -556,10 +600,10 @@
     const STATUS_LABELS = {
       pending: 'Pending', generating_image: 'Creating Image',
       confirming: 'Needs Review', generating_clips: 'Rendering Video',
-      done: 'Finished', error: 'Failed'
+      editing: 'Editing', done: 'Finished', error: 'Failed'
     };
 
-    // --- Core Architecture ---
+    // --- API ---
     async function api(method, path, body) {
       const o = { method, headers: { 'Content-Type': 'application/json' } };
       if (body !== undefined) o.body = JSON.stringify(body);
@@ -572,8 +616,6 @@
       const t = document.createElement('div');
       t.className = 'toast';
       const color = type === 'error' ? 'var(--danger)' : type === 'success' ? 'var(--success)' : 'var(--primary)';
-      const icon = type === 'error' ? 'error' : type === 'success' ? 'check_circle' : 'info';
-      // Fallback mapped lucide
       const lucideIcon = type === 'error' ? 'alert-circle' : type === 'success' ? 'check-circle' : 'info';
       t.innerHTML = `<i data-lucide="${lucideIcon}" style="color:${color};width:20px;height:20px"></i> <span>${msg}</span>`;
       document.getElementById('toast-container').appendChild(t);
@@ -599,6 +641,11 @@
     async function refreshProject() {
       if (!S.pid) return;
       S.project = await api('GET', `/projects/${S.pid}`);
+      renderSidebar();
+      if (S.sceneIdx !== null && typeof S.sceneIdx === 'number') {
+        renderSceneTimeline(S.sceneIdx);
+        renderSceneInspector(S.sceneIdx);
+      }
     }
 
     // --- Actions ---
@@ -617,6 +664,7 @@
       S.pid = pid; S.sceneIdx = null;
       await refreshProject();
       DOM.btnAddScene.disabled = false;
+      DOM.btnUploadVideo.disabled = false;
       renderSidebar();
       updateHeader();
       renderProjectInspector();
@@ -709,7 +757,7 @@
       if (S.polls[key]) return;
       S.polls[key] = true;
 
-      const DONE_STATES = ['done', 'error', 'confirming'];
+      const DONE_STATES = ['done', 'error', 'confirming', 'editing'];
 
       const tick = async () => {
         if (!S.polls[key]) return;
@@ -739,17 +787,400 @@
       setTimeout(tick, 3000);
     }
 
+    // --- Editing Functions ---
+    function startTrimMode() {
+      editMode = 'trim';
+      toast('Click on a clip to trim it', 'info');
+      highlightClipsForEditing();
+    }
+
+    function startCutMode() {
+      editMode = 'cut';
+      toast('Click on a clip to cut a section', 'info');
+      highlightClipsForEditing();
+    }
+
+    function startSplitMode() {
+      editMode = 'split';
+      toast('Click on a clip to split it', 'info');
+      highlightClipsForEditing();
+    }
+
+    function highlightClipsForEditing() {
+      document.querySelectorAll('.track-segment').forEach((el, i) => {
+        if (el.querySelector('video')) {
+          let color = editMode === 'trim' ? 'var(--primary)' : (editMode === 'cut' ? 'var(--warning)' : 'var(--success)');
+          el.style.border = `2px solid ${color}`;
+          el.style.cursor = 'pointer';
+          el.onclick = () => {
+            if (editMode === 'trim') showTrimDialog(i);
+            else if (editMode === 'cut') showCutDialog(i);
+            else if (editMode === 'split') showSplitDialog(i);
+          };
+        }
+      });
+    }
+
+    function clearEditHighlights() {
+      document.querySelectorAll('.track-segment').forEach(el => {
+        el.style.border = '';
+        el.style.cursor = '';
+        el.onclick = null;
+      });
+      editMode = null;
+    }
+
+    function showTrimDialog(clipIdx) {
+      clearEditHighlights();
+      const modalDiv = document.createElement('div');
+      modalDiv.className = 'modal-overlay';
+      modalDiv.innerHTML = `
+        <div class="modal">
+          <h3 style="margin-bottom: 16px;">Trim Clip ${clipIdx + 1}</h3>
+          <div class="input-group">
+            <label>Start Time (seconds)</label>
+            <input type="number" id="trim-start" class="input" step="0.1" min="0" value="0">
+          </div>
+          <div class="input-group">
+            <label>End Time (seconds)</label>
+            <input type="number" id="trim-end" class="input" step="0.1" min="0" value="4">
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" onclick="applyTrim(${clipIdx})">Apply</button>
+            <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modalDiv);
+    }
+
+    async function applyTrim(clipIdx) {
+      const start = parseFloat(document.getElementById('trim-start').value);
+      const end = parseFloat(document.getElementById('trim-end').value);
+      
+      if (isNaN(start) || isNaN(end) || start >= end) {
+        toast('Invalid trim values', 'error');
+        return;
+      }
+      
+      try {
+        await api('POST', `/projects/${S.pid}/scenes/${S.sceneIdx}/edit`, {
+          clip_index: clipIdx,
+          start_time: start,
+          end_time: end,
+          action: 'trim'
+        });
+        
+        document.querySelector('.modal-overlay')?.remove();
+        toast('Trim applying...', 'info');
+        await _waitForEdit(clipIdx);
+        toast('Trim applied', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    function showCutDialog(clipIdx) {
+      clearEditHighlights();
+      const modalDiv = document.createElement('div');
+      modalDiv.className = 'modal-overlay';
+      modalDiv.innerHTML = `
+        <div class="modal">
+          <h3 style="margin-bottom: 16px;">Cut Clip ${clipIdx + 1}</h3>
+          <div class="input-group">
+            <label>Cut Start (seconds)</label>
+            <input type="number" id="cut-start" class="input" step="0.1" min="0" value="1">
+          </div>
+          <div class="input-group">
+            <label>Cut End (seconds)</label>
+            <input type="number" id="cut-end" class="input" step="0.1" min="0" value="3">
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" onclick="applyCut(${clipIdx})">Apply Cut</button>
+            <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modalDiv);
+    }
+
+    async function applyCut(clipIdx) {
+      const start = parseFloat(document.getElementById('cut-start').value);
+      const end = parseFloat(document.getElementById('cut-end').value);
+      
+      if (isNaN(start) || isNaN(end) || start >= end) {
+        toast('Invalid cut values', 'error');
+        return;
+      }
+      
+      try {
+        await api('POST', `/projects/${S.pid}/scenes/${S.sceneIdx}/edit`, {
+          clip_index: clipIdx,
+          start_time: start,
+          end_time: end,
+          action: 'cut'
+        });
+        
+        document.querySelector('.modal-overlay')?.remove();
+        toast('Cut applying...', 'info');
+        await _waitForEdit(clipIdx);
+        toast('Cut applied', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    function showSplitDialog(clipIdx) {
+      clearEditHighlights();
+      const modalDiv = document.createElement('div');
+      modalDiv.className = 'modal-overlay';
+      modalDiv.innerHTML = `
+        <div class="modal">
+          <h3 style="margin-bottom: 16px;">Split Clip ${clipIdx + 1}</h3>
+          <div class="input-group">
+            <label>Split Position (seconds)</label>
+            <input type="number" id="split-pos" class="input" step="0.1" min="0" max="4" value="2">
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" onclick="applySplit(${clipIdx})">Split</button>
+            <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modalDiv);
+    }
+
+    async function applySplit(clipIdx) {
+      const pos = parseFloat(document.getElementById('split-pos').value);
+      
+      if (isNaN(pos) || pos <= 0 || pos >= 4) {
+        toast('Invalid split position (must be between 0 and 4)', 'error');
+        return;
+      }
+      
+      try {
+        await api('POST', `/projects/${S.pid}/scenes/${S.sceneIdx}/edit`, {
+          clip_index: clipIdx,
+          split_position: pos,
+          action: 'split'
+        });
+        
+        document.querySelector('.modal-overlay')?.remove();
+        toast('Split applying...', 'info');
+        await _waitForEdit(clipIdx);
+        toast('Clip split', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    function showTransitionDialog() {
+      clearEditHighlights();
+      const modalDiv = document.createElement('div');
+      modalDiv.className = 'modal-overlay';
+      modalDiv.innerHTML = `
+        <div class="modal">
+          <h3 style="margin-bottom: 16px;">Add Transition</h3>
+          <div class="input-group">
+            <label>From Clip Index</label>
+            <input type="number" id="trans-a" class="input" min="0" step="1">
+          </div>
+          <div class="input-group">
+            <label>To Clip Index</label>
+            <input type="number" id="trans-b" class="input" min="0" step="1">
+          </div>
+          <div class="input-group">
+            <label>Transition Type</label>
+            <select id="trans-type" class="input">
+              <option value="fade">Fade</option>
+              <option value="crossfade">Crossfade</option>
+              <option value="wipe">Wipe</option>
+              <option value="slide">Slide</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Duration (seconds)</label>
+            <input type="number" id="trans-duration" class="input" step="0.1" min="0.1" max="2" value="0.5">
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" onclick="applyTransition()">Add Transition</button>
+            <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modalDiv);
+    }
+
+    async function applyTransition() {
+      const clipA = parseInt(document.getElementById('trans-a').value);
+      const clipB = parseInt(document.getElementById('trans-b').value);
+      const transType = document.getElementById('trans-type').value;
+      const duration = parseFloat(document.getElementById('trans-duration').value);
+      
+      if (isNaN(clipA) || isNaN(clipB) || isNaN(duration)) {
+        toast('Invalid values', 'error');
+        return;
+      }
+      
+      try {
+        await api('POST', `/projects/${S.pid}/scenes/${S.sceneIdx}/transitions`, {
+          clip_index_a: clipA,
+          clip_index_b: clipB,
+          transition_type: transType,
+          duration: duration
+        });
+        
+        toast('Transition added', 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        await refreshProject();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    function showReorderDialog() {
+      clearEditHighlights();
+      const scene = S.project.scenes[S.sceneIdx];
+      const numClips = scene.clips.length;
+      if (numClips < 2) {
+        toast('Need at least 2 clips to reorder', 'error');
+        return;
+      }
+      
+      const modalDiv = document.createElement('div');
+      modalDiv.className = 'modal-overlay';
+      modalDiv.innerHTML = `
+        <div class="modal">
+          <h3 style="margin-bottom: 16px;">Reorder Clips</h3>
+          <div class="input-group">
+            <label>New Order (comma-separated indices, 0-${numClips-1})</label>
+            <input type="text" id="new-order" class="input" placeholder="e.g., 2,0,1,3,4">
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" onclick="applyReorder()">Apply</button>
+            <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modalDiv);
+    }
+
+    async function applyReorder() {
+      const orderStr = document.getElementById('new-order').value;
+      const newOrder = orderStr.split(',').map(n => parseInt(n.trim()));
+      const scene = S.project.scenes[S.sceneIdx];
+      
+      if (newOrder.length !== scene.clips.length) {
+        toast(`Need exactly ${scene.clips.length} indices`, 'error');
+        return;
+      }
+      
+      try {
+        await api('POST', `/projects/${S.pid}/scenes/${S.sceneIdx}/reorder`, { new_order: newOrder });
+        toast('Clips reordered', 'success');
+        document.querySelector('.modal-overlay')?.remove();
+        await refreshProject();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    async function exportCurrentScene() {
+      if (!S.pid || S.sceneIdx === null || S.sceneIdx === 'new') {
+        toast('No scene selected', 'error');
+        return;
+      }
+      
+      try {
+        await api('POST', `/projects/${S.pid}/scenes/${S.sceneIdx}/export`, { quality: 'high' });
+        toast('Export started', 'success');
+        await refreshProject();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    async function uploadVideoToScene() {
+      if (!S.pid || S.sceneIdx === null || S.sceneIdx === 'new') {
+        toast('Select or create a scene first', 'error');
+        return;
+      }
+      
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'video/mp4,video/quicktime,video/webm';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const formData = new FormData();
+        formData.append('video', file);
+        formData.append('position', '-1');
+        
+        try {
+          const res = await fetch(`${API}/projects/${S.pid}/scenes/${S.sceneIdx}/upload`, {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (!res.ok) throw new Error(await res.text());
+          
+          toast('Video uploaded', 'success');
+          await refreshProject();
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      };
+      input.click();
+    }
+
+    // Polls until the backend signals the edit is complete (last_edit field changes),
+    // then stamps a cache-busting timestamp so videos re-fetch from disk.
+    async function _waitForEdit(clipIdx, maxWait = 10000) {
+      const scene = S.project.scenes[S.sceneIdx];
+      const prevEdit = scene.last_edit || null;
+      const deadline = Date.now() + maxWait;
+
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const p = await api('GET', `/projects/${S.pid}`);
+          S.project = p;
+          const sc = p.scenes[S.sceneIdx];
+          if (sc && sc.last_edit !== prevEdit) {
+            // Check if it was an error
+            if (sc.last_edit && sc.last_edit.startsWith('error_')) {
+              toast(`Edit failed: ${sc.error || 'Unknown error'}`, 'error');
+              return;
+            }
+            // Edit is done — stamp cache-buster and show the edited clip directly
+            S._editTs = Date.now();
+            S._editedClipIdx = clipIdx;
+            renderSidebar();
+            renderSceneTimeline(S.sceneIdx);
+            updatePreview();
+            return;
+          }
+        } catch (e) { /* keep polling */ }
+      }
+      // Timed out — refresh anyway
+      S._editTs = Date.now();
+      await refreshProject();
+    }
+
     // --- UI Renderers ---
     function selectScene(idx) {
+      clearEditHighlights();
       S.sceneIdx = idx;
       renderSidebar();
       updatePreview();
-      renderSceneInspector(idx);
-
+      
       if (idx === 'new') {
         DOM.timelineTitle.innerHTML = `Timeline: New Setup`;
         DOM.timeline.innerHTML = `<div style="color:var(--text-disabled);margin:auto">No media to display</div>`;
+        renderNewSceneInspector();
       } else {
+        renderSceneInspector(idx);
         renderSceneTimeline(idx);
       }
     }
@@ -767,7 +1198,7 @@
       DOM.projectsList.innerHTML = S.projects.map(p => `
         <div class="list-item ${S.pid === p.project_id ? 'active' : ''}" onclick="selectProject('${p.project_id}')">
            <i data-lucide="folder" class="list-item-icon"></i>
-           <span class="list-item-title">${p.title}</span>
+           <span class="list-item-title">${escapeHtml(p.title)}</span>
         </div>
       `).join('');
 
@@ -817,7 +1248,7 @@
           DOM.preview.innerHTML = `
             <div class="preview-placeholder">
                <i data-lucide="layout-dashboard" style="width:48px;height:48px;opacity:0.3"></i>
-               <h3 style="font-weight:400;color:var(--text-main)">${p.title}</h3>
+               <h3 style="font-weight:400;color:var(--text-main)">${escapeHtml(p.title)}</h3>
                <p style="color:var(--text-muted)">Project Dashboard active. Select a scene below.</p>
             </div>`;
         }
@@ -852,9 +1283,17 @@
         inner = sc.source_image_url ?
           `<img src="${sc.source_image_url}" style="border-radius:var(--radius-card);opacity:0.4;filter:blur(4px)">
            <i data-lucide="loader-2" class="spin" style="position:absolute;width:48px;height:48px;color:var(--primary)"></i>` : '';
-      } else if (sc.status === 'done') {
-        if (sc.scene_video_url) {
-          inner = `<video src="${sc.scene_video_url}" controls autoplay loop style="width:100%;height:100%;border-radius:var(--radius-card)"></video>`;
+      } else if (sc.status === 'done' || sc.status === 'editing') {
+        const cb = S._editTs ? `?t=${S._editTs}` : '';
+        const editedIdx = (S._editedClipIdx != null) ? S._editedClipIdx : 0;
+        // If an edit was just applied, show the specific edited clip (cache-busted)
+        // so the trimmed/cut result is visible without needing scene.mp4 to rebuild.
+        if (cb && sc.clip_urls && sc.clip_urls[editedIdx]) {
+          inner = `<video src="${sc.clip_urls[editedIdx]}${cb}" controls autoplay style="width:100%;height:100%;border-radius:var(--radius-card)"></video>`;
+        } else if (sc.scene_video_url) {
+          inner = `<video src="${sc.scene_video_url}${cb}" controls autoplay loop style="width:100%;height:100%;border-radius:var(--radius-card)"></video>`;
+        } else if (sc.clip_urls && sc.clip_urls.length > 0 && sc.clip_urls[0]) {
+          inner = `<video src="${sc.clip_urls[0]}${cb}" controls style="width:100%;height:100%;border-radius:var(--radius-card)"></video>`;
         } else {
           inner = `<img src="${sc.source_image_url}" style="border-radius:var(--radius-card)">`;
         }
@@ -868,7 +1307,7 @@
 
     function renderProjectTimeline() {
       const p = S.project;
-      DOM.timelineTitle.innerHTML = `Project Overview: ${p.title}`;
+      DOM.timelineTitle.innerHTML = `Project Overview: ${escapeHtml(p.title)}`;
       if (!p.scenes || p.scenes.length === 0) {
         DOM.timeline.innerHTML = `<div style="color:var(--text-disabled);margin:auto">No scenes to display</div>`;
         return;
@@ -893,20 +1332,27 @@
         return;
       }
 
-      const doneClips = sc.clips?.length || 0;
-      DOM.timeline.innerHTML = Array.from({ length: 5 }, (_, i) => {
-        const url = sc.clip_urls?.[i];
+      const clips = sc.clips || [];
+      const clipUrls = sc.clip_urls || [];
+      
+      if (clips.length === 0) {
+        DOM.timeline.innerHTML = `<div style="color:var(--text-disabled);margin:auto">No clips yet. Upload a video or generate clips.</div>`;
+        return;
+      }
+
+      const cb = S._editTs || '';
+      DOM.timeline.innerHTML = clips.map((_, i) => {
+        const url = clipUrls[i];
         if (url) {
+          const busted = cb ? `${url}?t=${cb}` : url;
           return `
-          <div class="track-segment" style="border-bottom: 3px solid var(--primary)">
-             <video src="${url}" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause()"></video>
+          <div class="track-segment">
+             <video src="${busted}" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause()"></video>
              <div class="track-label">Clip ${i + 1}</div>
           </div>`;
         } else {
-          const proc = (sc.status === 'generating_clips' && i === doneClips);
           return `
           <div class="track-segment" style="background:var(--bg-surface-elevated)">
-             ${proc ? `<i data-lucide="loader" class="spin" style="color:var(--primary);opacity:0.8;width:20px;height:20px"></i>` : ``}
              <div class="track-label" style="opacity:0.5;background:transparent;color:var(--text-muted)">Clip ${i + 1}</div>
           </div>`;
         }
@@ -914,7 +1360,7 @@
       lucide.createIcons();
     }
 
-    // --- Property Panels (Inspector) ---
+    // --- Property Panels ---
     function renderNewProjectInspector() {
       S.pid = null; S.sceneIdx = null; S.project = null;
       renderSidebar(); updatePreview(); updateHeader();
@@ -933,6 +1379,27 @@
       `;
     }
 
+    function renderNewSceneInspector() {
+      DOM.inspectorHeader.textContent = "Scene Setup";
+      DOM.inspectorBody.innerHTML = `
+         <div class="input-group">
+            <label>Scene Description</label>
+            <textarea id="scene-prompt" class="textarea" rows="5" placeholder="Describe the scene setup, lighting, action..." autofocus></textarea>
+         </div>
+         <button id="btn-gen-scene" class="btn btn-primary" onclick="createScene()">
+            Generate Scene
+         </button>
+         <hr class="divider">
+         <div class="input-group">
+            <label>Or Upload Existing Video</label>
+            <button class="btn btn-outline" onclick="uploadVideoToScene()">
+               <i data-lucide="upload"></i> Upload Video
+            </button>
+         </div>
+      `;
+      lucide.createIcons();
+    }
+
     function renderProjectInspector() {
       const p = S.project;
       const total = (p.scenes || []).length;
@@ -943,7 +1410,7 @@
       let html = `
         <div style="display:flex;flex-direction:column;gap:16px;">
           <div>
-            <div style="font-size:16px;font-weight:500;color:var(--text-main);margin-bottom:8px">${p.title}</div>
+            <div style="font-size:16px;font-weight:500;color:var(--text-main);margin-bottom:8px">${escapeHtml(p.title)}</div>
             <div style="display:flex;gap:12px;">
               <span class="badge-chip">${total} Scenes</span>
               <span class="badge-chip" style="${p.final_status === 'done' ? 'background:rgba(129,201,149,0.1);color:var(--success);border-color:var(--success)' : ''}">${done}/${total} Completed</span>
@@ -956,9 +1423,6 @@
           <div class="card">
              <div style="display:flex;align-items:center;gap:12px;font-size:13px;font-weight:500;color:var(--primary);">
                 <i data-lucide="loader-2" class="spin"></i> Processing Final Video
-             </div>
-             <div style="height:4px;background:var(--bg-base);border-radius:2px;margin-top:12px;overflow:hidden;">
-                <div style="height:100%;width:40%;background:var(--primary);animation:pulse 1s infinite alternate"></div>
              </div>
           </div>
         `;
@@ -973,9 +1437,6 @@
           <div style="color:var(--success);font-weight:500;display:flex;align-items:center;gap:8px">
             <i data-lucide="check-circle" style="width:18px;height:18px"></i> Final Video Ready
           </div>
-          <button class="btn btn-outline" onclick="finalizeProject()">
-            <i data-lucide="refresh-cw"></i> Re-Export Video
-          </button>
         `;
       }
 
@@ -993,16 +1454,7 @@
 
     function renderSceneInspector(idx) {
       if (idx === 'new') {
-        DOM.inspectorHeader.textContent = "Scene Setup";
-        DOM.inspectorBody.innerHTML = `
-           <div class="input-group">
-              <label>Scene Description</label>
-              <textarea id="scene-prompt" class="textarea" rows="5" placeholder="Describe the scene setup, lighting, action..." autofocus></textarea>
-           </div>
-           <button id="btn-gen-scene" class="btn btn-primary" onclick="createScene()">
-              Generate Scene
-           </button>
-        `;
+        renderNewSceneInspector();
         return;
       }
 
@@ -1022,17 +1474,11 @@
                 <button class="btn btn-outline" style="flex:1;color:var(--danger);border-color:var(--danger)" onclick="confirmImg(${idx}, false)">Reject</button>
              </div>
           </div>
-          
-          <div class="input-group" style="margin-top:16px">
-             <label>Or modify description & retry</label>
-             <textarea id="regen-prompt" class="textarea" rows="3">${sc.raw_prompt}</textarea>
-             <button class="btn btn-outline" style="margin-top:8px" onclick="regenNewPrompt(${idx})">Regenerate</button>
-          </div>
         `;
       } else if (sc.status === 'error') {
         actionsHtml = `
           <div class="card" style="border-color:var(--danger);background:rgba(242, 139, 130, 0.05)">
-             <div style="font-weight:500;color:var(--danger);margin-bottom:8px;">Failure: ${sc.error || 'Unknown error occurred'}</div>
+             <div style="font-weight:500;color:var(--danger);margin-bottom:8px;">Failure: ${escapeHtml(sc.error || 'Unknown error occurred')}</div>
              <button class="btn btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="retryScene(${idx})">Try Again</button>
           </div>
         `;
@@ -1050,9 +1496,9 @@
           <hr class="divider">
           <div class="input-group">
              <label>Generated Clip Prompts</label>
-             <div class="prompt-chips">
+             <div style="max-height:300px;overflow-y:auto;">
                 ${sc.enhanced_prompts.map((p, i) => `
-                   <div class="prompt-card" data-number="${i + 1}">${p}</div>
+                   <div class="prompt-card" data-number="${i + 1}">${escapeHtml(p)}</div>
                 `).join('')}
              </div>
           </div>
@@ -1063,55 +1509,71 @@
         <div class="input-group" style="margin-bottom:24px">
            <label>Original Description</label>
            <div class="card" style="font-size:13px;color:var(--text-main);background:var(--bg-base);">
-              ${sc.raw_prompt}
+              ${escapeHtml(sc.raw_prompt)}
            </div>
         </div>
         ${actionsHtml}
         ${promptsHtml}
+        <hr class="divider">
+        <button class="btn btn-outline" onclick="uploadVideoToScene()">
+           <i data-lucide="upload"></i> Upload Video to Scene
+        </button>
       `;
       lucide.createIcons();
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+      });
     }
 
     // --- Keyboard Shortcuts ---
     window.addEventListener('keydown', (e) => {
       const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+      const isModal = document.querySelector('.modal-overlay');
 
-      // Cmd/Ctrl + Enter to Generate Scene
+      if (isModal) {
+        if (e.key === 'Escape') {
+          document.querySelector('.modal-overlay')?.remove();
+          clearEditHighlights();
+        }
+        return;
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         if (e.target.id === 'scene-prompt' || e.target.id === 'regen-prompt') {
           e.preventDefault();
           const btnGen = document.getElementById('btn-gen-scene');
-          const btnRegen = document.querySelector('button[onclick*="regenNewPrompt"]');
           if (btnGen && !btnGen.disabled) btnGen.click();
-          else if (btnRegen) btnRegen.click();
           return;
         }
       }
 
-      if (isInput) return; // Prevent triggering other shortcuts if typing
+      if (isInput) return;
 
-      // Cmd/Ctrl + N: New Project
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n' && !e.shiftKey) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         renderNewProjectInspector();
         return;
       }
       
-      // Shift + N: Add Scene
       if (e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         if (S.pid && !DOM.btnAddScene.disabled) showAddScene();
         return;
       }
 
-      // Cmd/Ctrl + E: Finalize/Export Project
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
         e.preventDefault();
         if (S.pid && S.project?.final_status !== 'processing') finalizeProject();
         return;
       }
 
-      // Up/Down Arrows: Navigate Scenes
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         if (S.pid && S.project?.scenes?.length) {
           e.preventDefault();
@@ -1124,9 +1586,8 @@
         return;
       }
       
-      // Escape: Return to Project Dashboard
       if (e.key === 'Escape') {
-        if (S.sceneIdx !== null) {
+        if (S.sceneIdx !== null && S.sceneIdx !== 'new') {
           e.preventDefault();
           selectProject(S.pid);
         }
