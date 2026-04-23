@@ -1,26 +1,4 @@
-"""
-StorageManager — filesystem layout + JSON index
 
-outputs/
-├── index.json                          ← master metadata store
-└── projects/
-    └── {project_id}/
-        ├── scenes/
-        │   └── {scene_idx}/
-        │       ├── source_image.png    ← txt2img keyframe (confirmed by user)
-        │       ├── last_frame.png      ← last frame of previous clip (seed)
-        │       ├── clips/
-        │       │   ├── clip_0.mp4
-        │       │   ├── clip_1.mp4
-        │       │   ├── clip_2.mp4
-        │       │   ├── clip_3.mp4
-        │       │   └── clip_4.mp4
-        │       ├── transitions/        ← NEW: stores transitioned clips
-        │       │   ├── transition_0_1.mp4
-        │       │   └── ...
-        │       └── scene.mp4           ← 5 clips assembled → 20s
-        └── final.mp4                   ← all scenes with lightning transitions
-"""
 
 import json
 from datetime import datetime, timezone
@@ -46,7 +24,7 @@ class StorageManager:
             self._idx = {"projects": {}}
             self._flush()
 
-    # ── Projects ──────────────────────────────────────────────────────────────
+    
 
     def create_project(self, title: str = "Untitled") -> dict:
         pid     = str(uuid4())
@@ -56,7 +34,7 @@ class StorageManager:
             "created_at":   _now(),
             "scenes":       [],
             "final_video":  None,
-            "final_status": "idle",     # idle | processing | done | error
+            "final_status": "idle",     
             "settings": {
                 "fps": 20,
                 "transition_duration": 0.4,
@@ -82,7 +60,7 @@ class StorageManager:
         self._idx["projects"][pid].update(kwargs)
         self._flush()
 
-    # ── Scenes ────────────────────────────────────────────────────────────────
+    
 
     def add_scene(
         self,
@@ -164,7 +142,7 @@ class StorageManager:
         })
         self._flush()
 
-    # ── Paths ─────────────────────────────────────────────────────────────────
+    
 
     def project_dir(self, pid: str) -> Path:
         return self.root / "projects" / pid
@@ -190,7 +168,7 @@ class StorageManager:
     def final_video_path(self, pid: str) -> Path:
         return self.project_dir(pid) / "final.mp4"
 
-    # ── URL helpers (relative to OUTPUT_DIR, for /files/ mount) ──────────────
+    
 
     def rel_url(self, abs_path: str | Path) -> str:
         try:
@@ -199,7 +177,7 @@ class StorageManager:
         except ValueError:
             return ""
 
-    # ── Internal ──────────────────────────────────────────────────────────────
+    
 
     def _flush(self):
         with open(self.index_path, "w") as f:
