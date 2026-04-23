@@ -1,43 +1,4 @@
-"""
-CineForge FastAPI Backend
-=========================
 
-Full pipeline per scene
-────────────────────────
- 1. POST /projects/{pid}/scenes
-      → Groq enhances raw prompt → 5 clip prompts + 1 image prompt
-      → Queues txt2img job (GPU_LOCK serialises with video jobs)
-      → Returns immediately; poll for status
-
- 2. GET  /projects/{pid}/scenes/{idx}
-      → Poll until status == "confirming"
-      → Response includes source_image_url for the UI to display
-
- 3. POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": true }
-      → Approved: starts 5-clip generation chain in background
-    POST /projects/{pid}/scenes/{idx}/confirm  { "confirmed": false }
-      → Rejected: regenerates source image (same prompt)
-    POST /projects/{pid}/scenes/{idx}/regenerate  { "prompt": "..." }
-      → Rejected with new description: re-enhances + regenerates
-
- 4. Background clip loop (for each of 5 clips):
-      upload seed image → img2vid → download clip
-      extract last frame → use as seed for next clip
-    → On completion: assemble 5 clips → 20s scene.mp4
-
- 5. POST /projects/{pid}/finalize
-      → Stitches all done scenes with lightning-flash transition → final.mp4
-
-NEW EDITING FEATURES:
- 6. POST /projects/{pid}/scenes/{scene_idx}/upload
-      → Upload existing video to use as clip
-
- 7. POST /projects/{pid}/scenes/{scene_idx}/edit
-      → Edit timeline: trim, cut, reorder clips
-
- 8. POST /projects/{pid}/scenes/{scene_idx}/transitions
-      → Add transitions between clips
-"""
 
 import asyncio
 import shutil
@@ -59,7 +20,7 @@ from storage import StorageManager
 from video_processing import assemble_scene, concatenate_scenes, edit_video, add_transition
 from workflows import build_image_workflow, build_video_workflow
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# ── App 
 app = FastAPI(title="CineForge — AI Video Editor & Generator", version="4.0.0")
 
 app.add_middleware(
@@ -76,7 +37,7 @@ app.mount("/files", StaticFiles(directory=str(settings.OUTPUT_DIR)), name="files
 app.mount("/ui",    StaticFiles(directory="frontend", html=True),    name="ui")
 
 
-# ── Pydantic models ───────────────────────────────────────────────────────────
+# ── Pydantic models 
 class CreateProjectReq(BaseModel):
     title: str = "Untitled Project"
 
@@ -84,13 +45,13 @@ class SceneReq(BaseModel):
     prompt: str
 
 class ConfirmReq(BaseModel):
-    confirmed: bool   # True → proceed with clip gen, False → regen image
+    confirmed: bool   
 
 class EditClipReq(BaseModel):
     clip_index: int
     start_time: Optional[float] = None
     end_time: Optional[float] = None
-    action: str  # "trim", "cut", "split"
+    action: str 
     split_position: Optional[float] = None
 
 class ReorderClipsReq(BaseModel):
@@ -99,20 +60,20 @@ class ReorderClipsReq(BaseModel):
 class AddTransitionReq(BaseModel):
     clip_index_a: int
     clip_index_b: int
-    transition_type: str = "fade"  # fade, crossfade, wipe, slide
+    transition_type: str = "fade" 
     duration: float = 0.5
 
 class ExportSceneReq(BaseModel):
     quality: str = "high"  # high, medium, low
 
 
-# ── Root ──────────────────────────────────────────────────────────────────────
+# ── Root 
 @app.get("/")
 async def root():
     return {"status": "ok", "ui": "/ui", "docs": "/docs", "version": "4.0.0"}
 
 
-# ── Projects ──────────────────────────────────────────────────────────────────
+# ── Projects 
 @app.post("/projects", status_code=201)
 async def create_project(req: CreateProjectReq):
     return storage.create_project(title=req.title)
@@ -138,7 +99,7 @@ def _hydrate_project(p: dict) -> dict:
     return p
 
 
-# ── Scene: create (AI Generation) ─────────────────────────────────────────────
+# ── Scene: create (AI Generation) 
 @app.post("/projects/{pid}/scenes", status_code=201)
 async def create_scene(pid: str, req: SceneReq, bg: BackgroundTasks):
     """
@@ -165,13 +126,13 @@ async def create_scene(pid: str, req: SceneReq, bg: BackgroundTasks):
     return _hydrate_scene(pid, storage.get_scene(pid, scene_idx))
 
 
-# ── Scene: upload existing video (New Editing Feature) ────────────────────────
+# ── Scene: upload existing video (New Editing Feature) 
 @app.post("/projects/{pid}/scenes/{scene_idx}/upload")
 async def upload_video_to_scene(
     pid: str, 
     scene_idx: int, 
     video: UploadFile = File(...),
-    position: int = Form(-1)  # -1 = append, else insert at position
+    position: int = Form(-1) 
 ):
     """
     Upload an existing video to use as a clip in this scene.
@@ -255,7 +216,7 @@ async def add_clip_transition(pid: str, scene_idx: int, req: AddTransitionReq, b
     return {"status": "adding_transition", "output": str(output_path)}
 
 
-# ── Scene: read ───────────────────────────────────────────────────────────────
+# ── Scene: read 
 @app.get("/projects/{pid}/scenes/{scene_idx}")
 async def get_scene(pid: str, scene_idx: int):
     s = storage.get_scene(pid, scene_idx)
@@ -275,7 +236,7 @@ def _hydrate_scene(pid: str, s: dict) -> dict:
     return s
 
 
-# ── Scene: confirm / reject source image ─────────────────────────────────────
+# ── Scene: confirm / reject source image 
 @app.post("/projects/{pid}/scenes/{scene_idx}/confirm")
 async def confirm_image(pid: str, scene_idx: int, req: ConfirmReq, bg: BackgroundTasks):
     scene = storage.get_scene(pid, scene_idx)
@@ -295,7 +256,7 @@ async def confirm_image(pid: str, scene_idx: int, req: ConfirmReq, bg: Backgroun
     return {"status": "generating_clips", "message": "Generating 5 clips…"}
 
 
-# ── Scene: regenerate with new prompt ─────────────────────────────────────────
+# ── Scene: regenerate with new prompt
 @app.post("/projects/{pid}/scenes/{scene_idx}/regenerate")
 async def regenerate_image(pid: str, scene_idx: int, req: SceneReq, bg: BackgroundTasks):
     scene = storage.get_scene(pid, scene_idx)
@@ -316,7 +277,7 @@ async def regenerate_image(pid: str, scene_idx: int, req: SceneReq, bg: Backgrou
     return {"status": "generating_image"}
 
 
-# ── Scene: export (New Feature) ───────────────────────────────────────────────
+# ── Scene: export (New Feature) 
 @app.post("/projects/{pid}/scenes/{scene_idx}/export")
 async def export_scene(
     pid: str, 
@@ -343,7 +304,7 @@ async def export_scene(
     return {"status": "exporting", "output_url": storage.rel_url(output_path)}
 
 
-# ── Finalize ──────────────────────────────────────────────────────────────────
+# ── Finalize 
 @app.post("/projects/{pid}/finalize")
 async def finalize_project(pid: str, bg: BackgroundTasks):
     project = storage.get_project(pid)
@@ -374,7 +335,7 @@ async def download_final(pid: str):
     )
 
 
-# ── Background tasks ──────────────────────────────────────────────────────────
+# Background tasks 
 
 async def _gen_source_image(pid: str, scene_idx: int, image_prompt: str):
     """
