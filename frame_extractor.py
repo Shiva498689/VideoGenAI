@@ -1,22 +1,10 @@
-"""
-Frame extraction using ffmpeg.
-
-extract_last_frame(video, output) → PNG of the very last frame.
-This PNG is used as the seed image for the next clip in the chain,
-ensuring visual continuity across the 5 clips of each scene.
-"""
 
 import subprocess
 from pathlib import Path
 
 
 def extract_last_frame(video_path: Path, output_path: Path) -> Path:
-    """
-    Extracts the last frame of a video as a PNG file.
 
-    Strategy 1 (fast): seek to 0.1s before end, grab 1 frame.
-    Strategy 2 (fallback): decode whole file, use thumbnail filter.
-    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Strategy 1 — fast seek from end
