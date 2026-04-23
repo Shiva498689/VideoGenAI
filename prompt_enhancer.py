@@ -1,11 +1,4 @@
-"""
-Groq-powered prompt enhancer.
 
-enhance_image_prompt(raw)  → one detailed txt2img prompt for the source frame
-enhance_prompt(raw)        → list of 5 sequential img2vid prompts for one scene
-
-Both use llama-3.3-70b-versatile via Groq's OpenAI-compatible endpoint.
-"""
 
 import json
 import httpx
@@ -50,7 +43,7 @@ Example:
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers 
 
 def _groq_headers() -> dict:
     return {
@@ -88,7 +81,7 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ── Public API 
 
 async def enhance_image_prompt(raw_prompt: str) -> str:
     """
